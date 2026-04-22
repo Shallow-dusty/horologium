@@ -1,0 +1,10 @@
+{
+  "model": {"display_name": "Opus"},
+  "workspace": {"current_dir": "/home/shallow/04.AI-Prism/00.Agent-CLI"},
+  "context_window": {"used_percentage": 15.7},
+  "cost": {"total_cost_usd": 1.23},
+  "rate_limits": {
+    "five_hour":  {"used_percentage": 89.7, "resets_at": 1776890209},
+    "seven_day":  {"used_percentage": 92, "resets_at": 1777162169}
+  }
+}
