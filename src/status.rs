@@ -184,7 +184,7 @@ fn build_segments(data: &Input) -> Vec<Segment> {
         ));
     }
     if let Some(dir) = data.workspace.current_dir.as_deref() {
-        let dir_link = Some(format!("file://{}", dir));
+        let dir_link = Some(format!("file://{}", encode_path_for_url(dir)));
         segs.push(
             Segment::fixed(
                 basename(dir).to_string(),
@@ -350,6 +350,26 @@ fn render_powerline(segs: &[Segment], hyperlinks: bool) -> String {
     if let Some(last) = segs.last() {
         // Trailing arrow back to terminal default: reset bg, fg = last bg.
         out.push_str(&format!("\x1b[0;38;5;{}m{}\x1b[0m", last.pl_bg, ARROW));
+    }
+    out
+}
+
+/// Percent-encode a filesystem path for safe embedding in a URL (RFC 3986).
+/// Preserves `/`, `:`, `@` and the unreserved set (alnum + `-._~`); encodes
+/// every other byte as `%XX`. Handles UTF-8 naturally (each non-ASCII byte
+/// becomes its own `%XX`). Used by the OSC 8 `file://` link on the cwd
+/// segment — paths with spaces, `#`, or non-ASCII characters would otherwise
+/// produce a broken hyperlink target.
+fn encode_path_for_url(path: &str) -> String {
+    let mut out = String::with_capacity(path.len());
+    for &b in path.as_bytes() {
+        if b.is_ascii_alphanumeric()
+            || matches!(b, b'-' | b'.' | b'_' | b'~' | b'/' | b':' | b'@')
+        {
+            out.push(b as char);
+        } else {
+            out.push_str(&format!("%{:02X}", b));
+        }
     }
     out
 }
@@ -574,6 +594,29 @@ mod tests {
     fn wrap_link_without_url_is_passthrough() {
         // Segment has no URL: no envelope even when --hyperlinks is on.
         assert_eq!(wrap_link("body", None, true), "body");
+    }
+
+    #[test]
+    fn encode_path_passes_unreserved_and_slash() {
+        assert_eq!(encode_path_for_url("/home/alice/proj"), "/home/alice/proj");
+        assert_eq!(encode_path_for_url("/a-b_c.d~e"), "/a-b_c.d~e");
+    }
+
+    #[test]
+    fn encode_path_percent_encodes_special_chars() {
+        assert_eq!(
+            encode_path_for_url("/tmp/my project"),
+            "/tmp/my%20project"
+        );
+        assert_eq!(encode_path_for_url("/a#b"), "/a%23b");
+        assert_eq!(encode_path_for_url("/q?x"), "/q%3Fx");
+        assert_eq!(encode_path_for_url("/%raw"), "/%25raw");
+    }
+
+    #[test]
+    fn encode_path_percent_encodes_utf8_bytes() {
+        // 中文 -> each UTF-8 byte becomes %XX. "中" = E4 B8 AD
+        assert_eq!(encode_path_for_url("/中"), "/%E4%B8%AD");
     }
 
     #[test]
