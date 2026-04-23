@@ -28,29 +28,36 @@
 - **`vX.0`**：新 Phase 完成（如 v1.0 = Phase 1 完成，v2.0 = Phase 2 完成）
 - **`vX.Y`**：小 bug 修复 / 小功能增强（Y 递增）
 
-## Phase 2 — `stat`（用量解析）
+## Phase 2 — `stat`（用量解析） 🟡 MVP `daily` 完成
 
-**目标**：面向 **外部 pipeline / 批处理** 的用量 CLI，不做 ccusage 的机械翻译。
-交互式查看场景已被 Claude Code 2.1.118 的 `/usage` TUI 吸收；Horologium `stat` 的差异化是：
-
-- 跨会话 / 跨项目聚合（TUI 只看当前会话）
-- pipe-friendly 输出（CSV / JSON / TSV）
-- shell 脚本 / CI 集成（返回码、退出语义）
-- 长周期趋势（日 / 周 / 月 rollup）
+**目标**（重定位于 2026-04-23）：**填补 Max 订阅的历史统计空白**。Claude Code
+`/usage` TUI 只看当前会话 + 当前窗口；Max 用户无法看到"这周花了多少 / 哪个项目最
+费 / 今天跟昨天对比"。Horologium `stat` 把这些信息从本地 JSONL 里算出来，单二进制、
+零 Node 依赖。**不是 ccusage 的机械翻译**——接口更克制、更贴 pipe。
 
 | 里程碑 | 状态 |
 |---|---|
-| 发现并读取 `~/.claude/projects/*.jsonl` | ⏳ |
-| 并行解析（`rayon`）| ⏳ |
-| 计数：input / output / cache-read / cache-write tokens | ⏳ |
-| 成本估算（对齐 Anthropic 定价表，单独 `pricing.rs`） | ⏳ |
-| 子命令：`stat daily` / `stat session` / `stat blocks`（5h 窗口）| ⏳ |
-| `--json` 输出 | ⏳ |
-| 与 ccusage 黄金样本对照验证 | ⏳ |
+| 发现并读取 `~/.claude/projects/*.jsonl` | ✅ 2026-04-23：`walker::find_jsonl` DFS 手写 |
+| 并行解析（`rayon`）| ✅ 2026-04-23：`par_iter().fold().reduce()` |
+| 计数：input / output / cache-read / cache-write (5m + 1h) tokens | ✅ 2026-04-23 |
+| 成本估算（对齐 Anthropic 定价表，单独 `pricing.rs`） | ✅ 2026-04-23：LiteLLM 快照 4 KB 嵌入 |
+| 子命令：`stat daily` | ✅ 2026-04-23：按日 rollup + `--since/--until/--project/--json/--root` |
+| 子命令：`stat session` / `stat blocks`（5h 窗口）| ⏳ 延后到 v2.x（Max 用户非刚需） |
+| `--json` 输出 | ✅ 2026-04-23：NDJSON 每行一对象 |
+| 与 ccusage 黄金样本对照验证 | ⏳ 延后到 v2.x |
 
-**需要确定的设计**：
-- 定价表如何更新？内嵌 + `--pricing-table` 覆盖 or 启动时拉取？倾向内嵌 + 每发版同步。
-- Session 的定义？沿用 ccusage 的 5h 滚动窗口。
+**实测**：本机 665 JSONL / 517 MB / 14 天历史 → **0.058 s**（rayon 8 核 7.4× 并行度），
+扫出 14,824 条 unique assistant 记录 / TOTAL $1761.36。二进制从 802 KB 涨到 1082 KB
+（chrono + rayon 进入代码路径）。
+
+**定价更新**：`scripts/gen-pricing.py` 从 LiteLLM 的
+`model_prices_and_context_window.json` 过滤 claude-* + slim 到 4 个成本字段。发版时
+重跑一次即可。
+
+**不做**：
+- 定价表运行时网络拉取（选择每次发版 regen，规避启动时网络依赖）
+- TOML / YAML 配置覆盖（MVP 不需要，见有用户抱怨再加）
+- 成本模式切换（官方定价一种；ccusage 的 hybrid 非 Max 刚需）
 
 ## Phase 3 — `configure`（TUI 配置器）
 
@@ -105,3 +112,8 @@
 | 2026-04-23 | `--hyperlinks` 关闭时短路 `origin_web_url()` 与 `file://` URL 合成 | 冷启动热路径不必要的 IO（读 `.git/config`）在默认模式下是纯浪费 |
 | 2026-04-23 | 切换 `~/.claude/statusline.sh` → `horologium status` 启动 2 周 dogfooding | Phase 1 出口条件；bash 原版备份到 `~/.backups/claude/` 便于回滚 |
 | 2026-04-23 | 新增 `tests/parity/` snapshot harness（7 fixtures × 5 modes = 35 cases）作为 NIT C 落地 | 未来 refactor 的安全网；`--vs-bash` 同时发现 bash 两处 bug（`xargs basename` 拆空格；`git branch --show-current` 读进程 cwd 而非 JSON 的 workspace.current_dir）—— horologium 均已正确处理，记入 `known-diffs.md` |
+| 2026-04-23 | Phase 2 范围重定位：从"外部 pipeline / 批处理差异化"改为"填补 Max 订阅历史统计空白" | 用户反馈：官方 `/usage` TUI 不覆盖历史/跨项目查询，Max 用户被堵死；原 roadmap 的"交互查看已被官方吸收"是错的 |
+| 2026-04-23 | 定价表用 LiteLLM 快照 `include_str!` 嵌入 + Python regen script，不走运行时 fetch | 启动无网络依赖 + 二进制体积 +4 KB 可接受；发版时重跑 `scripts/gen-pricing.py` 更新 |
+| 2026-04-23 | cache 1h write 价格 = 2× 5m（Anthropic 公开规则），表里硬编码；单测扫全表验证 2× 不变式 | LiteLLM 只给 5m 价；2× 规则是公开但未推送到 LiteLLM JSON；硬编码 + 不变式测试能让将来 Anthropic 调规则时立刻报错 |
+| 2026-04-23 | 跨文件 message-id dedup：fold 里保 `HashMap<id, PerIdSummary>`，reduce 后才 bucket 到 `BTreeMap<date, Totals>` | Claude Code 不应该跨 jsonl 重复 id，但备份 / rsync 可能复制文件；二阶段 dedup 顺带让 `unknown_models` 计数与 records 数永远一致 |
+| 2026-04-23 | Phase 2 `stat daily` MVP 发布，`session` / `blocks` 延后到 v2.x | `daily` 覆盖 Max 用户 90% 需求；`session` / `blocks` 是 ccusage 细分维度，Max 用户无刚需，不值得阻塞发版 |

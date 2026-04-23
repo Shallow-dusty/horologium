@@ -21,8 +21,8 @@ Horologium 做三件事：
 
 ## 当前状态
 
-- Phase 1 `status`：**v1.0 已完成**。全功能模式冷启动 <1 ms（比 bash 35 ms 快 35×+）。
-- Phase 2 `stat`：未实现。
+- Phase 1 `status`：**v1.1 已完成 + dogfooding 中**。全功能模式冷启动 <1 ms（比 bash 35 ms 快 35×+）。
+- Phase 2 `stat`：**`daily` MVP 已完成**（2026-04-23）。跨会话聚合、按日 rollup、项目过滤、JSON 输出。填补官方 `/usage` TUI 不覆盖的"历史 / 跨项目"查询空白。
 - Phase 3 `configure`：未实现。
 
 路线图详见 [`docs/roadmap.md`](docs/roadmap.md)。
@@ -77,6 +77,40 @@ Opus 4.7  01.Horologium  main  15%  $1.23  5h:75%⏳2h14m  7d:92%⏳3d5h
 
 示例：`horologium status --powerline --multiline --hyperlinks`
 
+## `stat daily`
+
+按日聚合 `~/.claude/projects/**/*.jsonl` 里的用量，打印 table 或 NDJSON。
+弥补 Claude Code `/usage` TUI 的"仅看当前会话"盲区 —— 适合跨会话累计、
+按项目看花销、CI/脚本集成。
+
+```bash
+horologium stat daily                          # 全部历史
+horologium stat daily --since 2026-04-01       # 限定时间
+horologium stat daily --since 2026-04-01 --until 2026-04-23
+horologium stat daily --project Horologium     # cwd 子串过滤
+horologium stat daily --json                   # NDJSON，pipe 到 jq
+horologium stat daily --root /other/path       # 指向非默认 projects 目录
+```
+
+输出示例：
+
+```
+Day         Records    Input   Cache-5m   Cache-1h    Cache-Read    Output     Cost
+-------------------------------------------------------------------------------------
+2026-04-22      817   90,301    280,358  4,776,995   114,655,764  1,117,634  $145.40
+2026-04-23    1,189   49,551    845,772  3,139,234   165,140,555    887,560  $149.37
+-------------------------------------------------------------------------------------
+TOTAL         2,006  139,852  1,126,130  7,916,229   279,796,319  2,005,194  $294.77
+```
+
+定价表嵌在二进制里（`data/litellm-anthropic-pricing.json`，~4 KB，21 个
+claude-* 模型），源头是 LiteLLM 的 `model_prices_and_context_window.json`。
+重新生成：`scripts/gen-pricing.py`（curl + python 两步）。
+
+未识别的模型（例如 Claude Code 内部用的 `<synthetic>` 标签）token 照算、
+cost 计 0，并在底部列出 warning。按 `message.id` 跨文件去重，消息不会被
+重复计费。665 文件 / 517 MB 的语料在 8 核上 ~60 ms 扫完。
+
 ## 与 `statusline.sh` 的 parity 承诺
 
 Horologium 对标 `~/.claude/statusline.sh` 的行为，在下列条件下保证 branch-by-branch 一致：
@@ -101,8 +135,9 @@ Horologium 对标 `~/.claude/statusline.sh` 的行为，在下列条件下保证
 | CLI 分派 | `clap` derive |
 | JSON 解析 | `serde` + `serde_json` |
 | 颜色 | `owo-colors`（零依赖 ANSI） |
-| TUI（后续）| `ratatui` + `crossterm` |
-| JSONL 并行读取（后续）| `rayon` |
+| 时间 / 日期 | `chrono`（local tz + `NaiveDate` 桶键） |
+| JSONL 并行读取 | `rayon`（fold + reduce） |
+| TUI（后续） | `ratatui` + `crossterm` |
 | 错误处理 | `anyhow` |
 
 编译设定启用 `lto = "thin"` + `codegen-units = 1` + `strip = "symbols"`，追求最小冷启动开销。

@@ -22,7 +22,9 @@ v1.1 修了 v1.0 审出来的 7 项：bash banker's rounding parity、worktree o
 
 2026-04-23 起：`~/.claude/settings.json` 的 statusLine 已指向 `horologium status`（bash 原版备份于 `~/.backups/claude/`）；`tests/parity/` 下新增 snapshot harness（7 fixtures × 5 modes = 35 cases），`run.sh --vs-bash` 附带反向发现 bash 两处 bug，已记于 `tests/parity/known-diffs.md`。
 
-下一步：2 周 dogfooding 窗口期内观测无退化，随后 Phase 2 `stat`（外部 pipeline / 批处理 CLI，非 ccusage 翻译）。
+2026-04-23：**Phase 2 `stat daily` MVP 完成**。填补 Max 订阅历史统计空白（官方 `/usage` TUI 仅覆盖当前会话）。跨会话 / 按日聚合，支持 `--since / --until / --project / --json / --root`，按 `message.id` 跨文件 dedup。定价表用 LiteLLM 快照嵌入 + `scripts/gen-pricing.py` 发版时 regen。本机 665 文件 / 517 MB / 14 天历史在 8 核上 ~60 ms 出结果。`session` / `blocks` 子命令延后到 v2.x（非 Max 用户刚需）。
+
+下一步：2 周 dogfooding 窗口期（观察 statusLine 稳定性）；Phase 3 `configure` 未启动。
 
 ## 目录结构
 
@@ -31,14 +33,24 @@ src/
 ├── main.rs       # clap 分派
 ├── status.rs     # Phase 1: 状态栏渲染
 ├── git.rs        # .git/HEAD + origin URL 手写解析
-├── stat.rs       # Phase 2: JSONL 用量分析（未建）
+├── stat/         # Phase 2: JSONL 用量分析
+│   ├── mod.rs        # CLI + dispatch
+│   ├── walker.rs     # 递归扫 .jsonl
+│   ├── record.rs     # JSONL 行 → Record
+│   ├── pricing.rs    # 嵌入 LiteLLM 快照 + cost 算法
+│   ├── aggregate.rs  # rayon fold + 跨文件 id dedup + 日桶
+│   └── format.rs     # table + NDJSON
 └── config.rs     # Phase 3: TUI 配置器（未建）
+data/
+└── litellm-anthropic-pricing.json  # 定价源（gen-pricing.py regen）
+scripts/
+└── gen-pricing.py                  # 从 LiteLLM full JSON 生成 slim 快照
 docs/
 └── roadmap.md    # 四阶段路线图 + 决策日志
 tests/parity/
 ├── run.sh        # snapshot harness（check / --update / --vs-bash）
-├── fixtures/     # 7 个 JSON 输入
-├── snapshots/    # 35 个 .snap（fixture × 5 render modes）
+├── fixtures/     # 10 个 JSON 输入
+├── snapshots/    # 50 个 .snap（fixture × 5 render modes）
 ├── known-diffs.md
 └── README.md
 ```
