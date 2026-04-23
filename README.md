@@ -73,7 +73,7 @@ Opus 4.7  01.Horologium  main  15%  $1.23  5h:75%⏳2h14m  7d:92%⏳3d5h
 |---|---|
 | `--powerline` | 每段带背景色块 + U+E0B0 三角箭头分隔（需 Powerline/Nerd Font） |
 | `--multiline` | 输出两行：第一行身份（model / dir / branch），第二行用量（ctx% / cost / 5h / 7d） |
-| `--hyperlinks` | dir 段和 branch 段包一层 OSC 8 超链接——dir 跳 `file://...`，branch 跳 git origin 的 web URL；不支持 OSC 8 的终端自动忽略 |
+| `--hyperlinks` | dir 段和 branch 段包一层 OSC 8 超链接——dir 跳 `file://...`，branch 跳 git origin 的 web URL。现代终端（iTerm2 / WezTerm / Kitty / Alacritty 等）渲染为可点击；部分旧终端会把转义字节直接显示出来，因此默认关闭 |
 
 示例：`horologium status --powerline --multiline --hyperlinks`
 
