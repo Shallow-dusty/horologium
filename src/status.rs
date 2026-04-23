@@ -20,6 +20,10 @@ pub struct StatusArgs {
     /// Requires a Powerline-patched / Nerd Font for the  (U+E0B0) glyph.
     #[arg(long)]
     powerline: bool,
+    /// Split output into two rows: identity (model/dir/branch) on top,
+    /// usage (context %/cost/rate limits) below. Works alongside --powerline.
+    #[arg(long)]
+    multiline: bool,
 }
 
 #[derive(Deserialize, Default)]
@@ -72,6 +76,7 @@ struct Window {
 /// (pre-colored via `owo-colors` for rate segments, raw otherwise) and a
 /// background color index for powerline rendering. The two modes share the
 /// same segment list but pick different representations at render time.
+#[derive(Clone)]
 struct Segment {
     /// Plain text without any ANSI. Used as the body in powerline mode.
     text: String,
@@ -81,6 +86,9 @@ struct Segment {
     pl_bg: u8,
     /// Xterm 256-color index for the segment foreground in powerline mode.
     pl_fg: u8,
+    /// Row index for multiline mode. 0 = identity row (model/dir/branch),
+    /// 1 = usage row (ctx%/cost/rate). Ignored when --multiline is off.
+    row: u8,
 }
 
 // Fixed color pairs for powerline segments (xterm-256 indices).
@@ -107,32 +115,71 @@ pub fn run(args: StatusArgs) -> Result<()> {
 
     let segments = build_segments(&data);
 
-    let line = if args.powerline {
-        render_powerline(&segments)
+    let renderer = if args.powerline {
+        render_powerline
     } else {
-        render_plain(&segments)
+        render_plain
     };
-    println!("{}", line);
+    let output = if args.multiline {
+        render_multiline(&segments, renderer)
+    } else {
+        renderer(&segments)
+    };
+    println!("{}", output);
     Ok(())
 }
 
+/// Split segments by `row`, render each group with the given renderer,
+/// then join with newlines. Empty groups are dropped so a missing row
+/// doesn't leave a blank line.
+fn render_multiline(segs: &[Segment], renderer: fn(&[Segment]) -> String) -> String {
+    let rows = max_row(segs) + 1;
+    (0..rows)
+        .map(|r| segs.iter().filter(|s| s.row == r).cloned().collect::<Vec<_>>())
+        .filter(|group| !group.is_empty())
+        .map(|group| renderer(&group))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn max_row(segs: &[Segment]) -> u8 {
+    segs.iter().map(|s| s.row).max().unwrap_or(0)
+}
+
 fn build_segments(data: &Input) -> Vec<Segment> {
+    // Row layout for --multiline:
+    //   row 0 = identity (model / dir / branch)
+    //   row 1 = usage    (ctx% / cost / 5h / 7d)
+    const ROW_IDENTITY: u8 = 0;
+    const ROW_USAGE: u8 = 1;
+
     let mut segs: Vec<Segment> = Vec::new();
 
     if let Some(name) = data.model.display_name.as_deref() {
-        segs.push(Segment::fixed(name.to_string(), PL_MODEL_BG, PL_MODEL_FG));
+        segs.push(Segment::fixed(
+            name.to_string(),
+            PL_MODEL_BG,
+            PL_MODEL_FG,
+            ROW_IDENTITY,
+        ));
     }
     if let Some(dir) = data.workspace.current_dir.as_deref() {
         segs.push(Segment::fixed(
             basename(dir).to_string(),
             PL_DIR_BG,
             PL_DIR_FG,
+            ROW_IDENTITY,
         ));
         // Mirror bash `git branch --show-current 2>/dev/null`: emit branch
         // only when attached to a local branch; detached HEAD / non-git dir
         // yields nothing.
         if let Some(branch) = crate::git::current_branch(Path::new(dir)) {
-            segs.push(Segment::fixed(branch, PL_BRANCH_BG, PL_BRANCH_FG));
+            segs.push(Segment::fixed(
+                branch,
+                PL_BRANCH_BG,
+                PL_BRANCH_FG,
+                ROW_IDENTITY,
+            ));
         }
     }
 
@@ -144,6 +191,7 @@ fn build_segments(data: &Input) -> Vec<Segment> {
         format!("{}%", pct as i64),
         PL_CTX_BG,
         PL_CTX_FG,
+        ROW_USAGE,
     ));
 
     let cost = data.cost.total_cost_usd.unwrap_or(0.0);
@@ -151,6 +199,7 @@ fn build_segments(data: &Input) -> Vec<Segment> {
         format!("${:.2}", cost),
         PL_COST_BG,
         PL_COST_FG,
+        ROW_USAGE,
     ));
 
     // Rate limit block is gated on `five_hour` presence (bash: `[ -n "$RATE_5H" ]`).
@@ -162,8 +211,13 @@ fn build_segments(data: &Input) -> Vec<Segment> {
                 .duration_since(UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_secs() as i64;
-            segs.push(build_rate_segment("5h", Some(five_hour), now));
-            segs.push(build_rate_segment("7d", rl.seven_day.as_ref(), now));
+            segs.push(build_rate_segment("5h", Some(five_hour), now, ROW_USAGE));
+            segs.push(build_rate_segment(
+                "7d",
+                rl.seven_day.as_ref(),
+                now,
+                ROW_USAGE,
+            ));
         }
     }
 
@@ -172,17 +226,18 @@ fn build_segments(data: &Input) -> Vec<Segment> {
 
 impl Segment {
     /// Segment with fixed coloring: no plain-mode color, fixed powerline pair.
-    fn fixed(text: String, pl_bg: u8, pl_fg: u8) -> Self {
+    fn fixed(text: String, pl_bg: u8, pl_fg: u8, row: u8) -> Self {
         Self {
             plain: text.clone(),
             text,
             pl_bg,
             pl_fg,
+            row,
         }
     }
 
     /// Segment colored by threshold (used for rate_limits 5h/7d).
-    fn threshold(text: String, pct: i64) -> Self {
+    fn threshold(text: String, pct: i64, row: u8) -> Self {
         let plain = colorize_plain(pct, &text);
         let (pl_fg, pl_bg) = powerline_rate_colors(pct);
         Self {
@@ -190,11 +245,12 @@ impl Segment {
             plain,
             pl_bg,
             pl_fg,
+            row,
         }
     }
 }
 
-fn build_rate_segment(label: &str, w: Option<&Window>, now: i64) -> Segment {
+fn build_rate_segment(label: &str, w: Option<&Window>, now: i64, row: u8) -> Segment {
     let (pct, resets_at) = match w {
         Some(w) => (w.used_percentage.unwrap_or(0.0), w.resets_at),
         None => (0.0, None),
@@ -206,7 +262,7 @@ fn build_rate_segment(label: &str, w: Option<&Window>, now: i64) -> Segment {
     if let Some(reset_at) = resets_at {
         body.push_str(&format!("⏳{}", fmt_countdown(reset_at - now)));
     }
-    Segment::threshold(body, pct_i)
+    Segment::threshold(body, pct_i, row)
 }
 
 fn colorize_plain(pct: i64, s: &str) -> String {
@@ -319,7 +375,7 @@ mod tests {
             used_percentage: Some(89.7),
             resets_at: None,
         };
-        let s = build_rate_segment("5h", Some(&w), 0);
+        let s = build_rate_segment("5h", Some(&w), 0, 1);
         assert!(
             s.text.contains("5h:90%"),
             "expected 90% (rounded), got: {}",
@@ -329,7 +385,7 @@ mod tests {
 
     #[test]
     fn rate_missing_window_defaults_to_zero() {
-        let s = build_rate_segment("7d", None, 0);
+        let s = build_rate_segment("7d", None, 0, 1);
         assert!(s.text.contains("7d:0%"), "expected 7d:0%, got: {}", s.text);
         assert!(
             !s.text.contains("⏳"),
@@ -344,7 +400,7 @@ mod tests {
             used_percentage: Some(50.0),
             resets_at: None,
         };
-        let s = build_rate_segment("5h", Some(&w), 0);
+        let s = build_rate_segment("5h", Some(&w), 0, 1);
         assert!(s.text.contains("5h:50%"));
         assert!(!s.text.contains("⏳"));
     }
@@ -372,9 +428,9 @@ mod tests {
     #[test]
     fn render_plain_joins_with_two_spaces() {
         let segs = vec![
-            Segment::fixed("a".into(), 0, 0),
-            Segment::fixed("b".into(), 0, 0),
-            Segment::fixed("c".into(), 0, 0),
+            Segment::fixed("a".into(), 0, 0, 0),
+            Segment::fixed("b".into(), 0, 0, 0),
+            Segment::fixed("c".into(), 0, 0, 0),
         ];
         assert_eq!(render_plain(&segs), "a  b  c");
     }
@@ -382,15 +438,14 @@ mod tests {
     #[test]
     fn render_powerline_emits_arrows_and_body() {
         let segs = vec![
-            Segment::fixed("A".into(), 24, 15),
-            Segment::fixed("B".into(), 31, 15),
+            Segment::fixed("A".into(), 24, 15, 0),
+            Segment::fixed("B".into(), 31, 15, 0),
         ];
         let out = render_powerline(&segs);
         // Two bodies + transition arrow + trailing arrow.
         assert!(out.contains(" A "));
         assert!(out.contains(" B "));
-        // Three arrow occurrences: one transition + one trailing (no leading).
-        // Actually: 0 leading + 1 transition (between A & B) + 1 trailing = 2.
+        // 0 leading + 1 transition (between A & B) + 1 trailing = 2.
         let arrow_count = out.matches(ARROW).count();
         assert_eq!(arrow_count, 2, "expected 2 arrows, got {}: {:?}", arrow_count, out);
         // Ends with reset.
@@ -400,5 +455,29 @@ mod tests {
     #[test]
     fn render_powerline_empty_segments_is_empty() {
         assert_eq!(render_powerline(&[]), "");
+    }
+
+    #[test]
+    fn render_multiline_splits_by_row() {
+        let segs = vec![
+            Segment::fixed("m".into(), 0, 0, 0),
+            Segment::fixed("d".into(), 0, 0, 0),
+            Segment::fixed("42%".into(), 0, 0, 1),
+            Segment::fixed("$0.10".into(), 0, 0, 1),
+        ];
+        let out = render_multiline(&segs, render_plain);
+        let lines: Vec<&str> = out.split('\n').collect();
+        assert_eq!(lines.len(), 2, "expected 2 rows, got {:?}", lines);
+        assert_eq!(lines[0], "m  d");
+        assert_eq!(lines[1], "42%  $0.10");
+    }
+
+    #[test]
+    fn render_multiline_drops_empty_rows() {
+        // Only row 0 populated: output should be a single line, not "m\n".
+        let segs = vec![Segment::fixed("m".into(), 0, 0, 0)];
+        let out = render_multiline(&segs, render_plain);
+        assert_eq!(out, "m");
+        assert!(!out.contains('\n'));
     }
 }
