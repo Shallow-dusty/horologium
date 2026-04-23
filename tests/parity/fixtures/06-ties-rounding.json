@@ -1,0 +1,10 @@
+{
+  "workspace": {"current_dir": "/tmp"},
+  "context_window": {"used_percentage": 50.0},
+  "model": {"display_name": "Opus 4.7"},
+  "cost": {"total_cost_usd": 1.0},
+  "rate_limits": {
+    "five_hour": {"utilization": 90.5},
+    "seven_day": {"utilization": 70.5}
+  }
+}
