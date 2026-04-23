@@ -113,7 +113,10 @@ pub fn format_table(report: &Report) -> String {
 
     if report.malformed_lines > 0 {
         out.push('\n');
-        out.push_str(&format!("note: {} malformed line(s) skipped\n", report.malformed_lines));
+        out.push_str(&format!(
+            "note: {} malformed line(s) skipped\n",
+            report.malformed_lines
+        ));
     }
     if report.divergent_duplicates > 0 {
         if report.malformed_lines == 0 {

@@ -125,8 +125,8 @@ fn resolve_root(override_path: Option<PathBuf>) -> Result<PathBuf> {
     if let Some(p) = override_path {
         return Ok(p);
     }
-    let home = std::env::var_os("HOME")
-        .ok_or_else(|| anyhow!("$HOME not set; pass --root explicitly"))?;
+    let home =
+        std::env::var_os("HOME").ok_or_else(|| anyhow!("$HOME not set; pass --root explicitly"))?;
     Ok(PathBuf::from(home).join(".claude/projects"))
 }
 
@@ -206,6 +206,9 @@ mod tests {
             ..empty_args()
         };
         let f = build_filters(&args).unwrap();
-        assert!(f.project_substring.is_none(), "empty --project should normalize to None");
+        assert!(
+            f.project_substring.is_none(),
+            "empty --project should normalize to None"
+        );
     }
 }

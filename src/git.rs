@@ -130,11 +130,7 @@ fn normalize_remote_url(url: &str) -> String {
                 let host = host_port.split(':').next().unwrap_or(host_port);
                 format!("{}/{}", host, path)
             }
-            None => host_path
-                .split(':')
-                .next()
-                .unwrap_or(host_path)
-                .to_string(),
+            None => host_path.split(':').next().unwrap_or(host_path).to_string(),
         };
         return format!("https://{}", normalized);
     }

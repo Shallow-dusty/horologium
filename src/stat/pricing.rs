@@ -190,7 +190,8 @@ mod tests {
         // unknown_models warning bucket.
         let bare = lookup("claude-opus-4-7").expect("bare must price");
         let anth = lookup("anthropic/claude-opus-4-7").expect("anthropic/ prefix must price");
-        let or = lookup("openrouter/anthropic/claude-opus-4-7").expect("openrouter/anthropic/ prefix must price");
+        let or = lookup("openrouter/anthropic/claude-opus-4-7")
+            .expect("openrouter/anthropic/ prefix must price");
         assert_eq!(bare.input_per_mtok, anth.input_per_mtok);
         assert_eq!(bare.input_per_mtok, or.input_per_mtok);
         assert_eq!(bare.output_per_mtok, anth.output_per_mtok);
@@ -234,11 +235,7 @@ mod tests {
         let r = mk_record("claude-opus-4-7", 1_000_000, 1_000_000, 1_000_000, 0, 0);
         let row = lookup("claude-opus-4-7").unwrap();
         let cost = cost_for_record(&r, row);
-        assert!(
-            (cost - 36.25).abs() < 1e-6,
-            "expected 36.25, got {}",
-            cost
-        );
+        assert!((cost - 36.25).abs() < 1e-6, "expected 36.25, got {}", cost);
     }
 
     #[test]

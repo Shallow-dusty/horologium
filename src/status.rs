@@ -155,7 +155,12 @@ fn render_row(segs: &[Segment], opts: &RenderOpts) -> String {
 fn render_multiline(segs: &[Segment], opts: &RenderOpts) -> String {
     let rows = max_row(segs) + 1;
     (0..rows)
-        .map(|r| segs.iter().filter(|s| s.row == r).cloned().collect::<Vec<_>>())
+        .map(|r| {
+            segs.iter()
+                .filter(|s| s.row == r)
+                .cloned()
+                .collect::<Vec<_>>()
+        })
         .filter(|group| !group.is_empty())
         .map(|group| render_row(&group, opts))
         .collect::<Vec<_>>()
@@ -345,17 +350,11 @@ fn render_powerline(segs: &[Segment], hyperlinks: bool) -> String {
         if i > 0 {
             let prev_bg = segs[i - 1].pl_bg;
             // Transition arrow: fg = previous segment's bg, bg = current bg.
-            out.push_str(&format!(
-                "\x1b[38;5;{};48;5;{}m{}",
-                prev_bg, s.pl_bg, ARROW
-            ));
+            out.push_str(&format!("\x1b[38;5;{};48;5;{}m{}", prev_bg, s.pl_bg, ARROW));
         }
         // Body (optionally wrapped in OSC 8) inherits the segment's bg so the
         // hyperlink underline appears inside the colored block.
-        let body = format!(
-            "\x1b[38;5;{};48;5;{}m {} ",
-            s.pl_fg, s.pl_bg, s.text
-        );
+        let body = format!("\x1b[38;5;{};48;5;{}m {} ", s.pl_fg, s.pl_bg, s.text);
         out.push_str(&wrap_link(&body, s.link.as_deref(), hyperlinks));
     }
     if let Some(last) = segs.last() {
@@ -374,8 +373,7 @@ fn render_powerline(segs: &[Segment], hyperlinks: bool) -> String {
 fn encode_path_for_url(path: &str) -> String {
     let mut out = String::with_capacity(path.len());
     for &b in path.as_bytes() {
-        if b.is_ascii_alphanumeric()
-            || matches!(b, b'-' | b'.' | b'_' | b'~' | b'/' | b':' | b'@')
+        if b.is_ascii_alphanumeric() || matches!(b, b'-' | b'.' | b'_' | b'~' | b'/' | b':' | b'@')
         {
             out.push(b as char);
         } else {
@@ -550,7 +548,11 @@ mod tests {
         assert!(out.contains(" B "));
         // 0 leading + 1 transition (between A & B) + 1 trailing = 2.
         let arrow_count = out.matches(ARROW).count();
-        assert_eq!(arrow_count, 2, "expected 2 arrows, got {}: {:?}", arrow_count, out);
+        assert_eq!(
+            arrow_count, 2,
+            "expected 2 arrows, got {}: {:?}",
+            arrow_count, out
+        );
         // Ends with reset.
         assert!(out.ends_with("\x1b[0m"));
     }
@@ -615,10 +617,7 @@ mod tests {
 
     #[test]
     fn encode_path_percent_encodes_special_chars() {
-        assert_eq!(
-            encode_path_for_url("/tmp/my project"),
-            "/tmp/my%20project"
-        );
+        assert_eq!(encode_path_for_url("/tmp/my project"), "/tmp/my%20project");
         assert_eq!(encode_path_for_url("/a#b"), "/a%23b");
         assert_eq!(encode_path_for_url("/q?x"), "/q%3Fx");
         assert_eq!(encode_path_for_url("/%raw"), "/%25raw");
@@ -640,8 +639,9 @@ mod tests {
 
     #[test]
     fn render_plain_with_hyperlinks_wraps_segment_with_link() {
-        let seg = Segment::fixed("01.Horologium".into(), 0, 0, 0)
-            .with_link(Some("file:///home/shallow/08.Rust-Inscription/01.Horologium".into()));
+        let seg = Segment::fixed("01.Horologium".into(), 0, 0, 0).with_link(Some(
+            "file:///home/shallow/08.Rust-Inscription/01.Horologium".into(),
+        ));
         let out = render_plain(&[seg], true);
         assert!(out.contains("\x1b]8;;file:///home/shallow"));
         assert!(out.contains("01.Horologium"));

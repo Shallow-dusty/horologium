@@ -258,7 +258,14 @@ mod tests {
         path
     }
 
-    fn assistant(msg_id: &str, model: &str, ts: &str, cwd: &str, input: u64, output: u64) -> String {
+    fn assistant(
+        msg_id: &str,
+        model: &str,
+        ts: &str,
+        cwd: &str,
+        input: u64,
+        output: u64,
+    ) -> String {
         format!(
             r#"{{"type":"assistant","timestamp":"{}","cwd":"{}","message":{{"id":"{}","model":"{}","usage":{{"input_tokens":{},"output_tokens":{},"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}}}}}"#,
             ts, cwd, msg_id, model, input, output
@@ -268,11 +275,36 @@ mod tests {
     #[test]
     fn aggregates_single_file_by_day() {
         let tmp = tempfile::tempdir().unwrap();
-        let path = write_jsonl(tmp.path(), "s.jsonl", &[
-            &assistant("m1", "claude-opus-4-7", "2026-04-05T12:00:00Z", "/a", 1000, 500),
-            &assistant("m2", "claude-opus-4-7", "2026-04-05T13:00:00Z", "/a", 2000, 1000),
-            &assistant("m3", "claude-opus-4-7", "2026-04-06T12:00:00Z", "/a", 500, 250),
-        ]);
+        let path = write_jsonl(
+            tmp.path(),
+            "s.jsonl",
+            &[
+                &assistant(
+                    "m1",
+                    "claude-opus-4-7",
+                    "2026-04-05T12:00:00Z",
+                    "/a",
+                    1000,
+                    500,
+                ),
+                &assistant(
+                    "m2",
+                    "claude-opus-4-7",
+                    "2026-04-05T13:00:00Z",
+                    "/a",
+                    2000,
+                    1000,
+                ),
+                &assistant(
+                    "m3",
+                    "claude-opus-4-7",
+                    "2026-04-06T12:00:00Z",
+                    "/a",
+                    500,
+                    250,
+                ),
+            ],
+        );
         let r = aggregate_daily(&[path], &Filters::default());
         assert_eq!(r.rows.len(), 2);
         let d5 = NaiveDate::from_ymd_opt(2026, 4, 5).unwrap();
@@ -287,13 +319,40 @@ mod tests {
     #[test]
     fn dedups_across_files() {
         let tmp = tempfile::tempdir().unwrap();
-        let a = write_jsonl(tmp.path(), "a.jsonl", &[
-            &assistant("shared", "claude-opus-4-7", "2026-04-05T12:00:00Z", "/p", 100, 50),
-        ]);
-        let b = write_jsonl(tmp.path(), "b.jsonl", &[
-            &assistant("shared", "claude-opus-4-7", "2026-04-05T12:00:00Z", "/p", 100, 50),
-            &assistant("unique", "claude-opus-4-7", "2026-04-05T12:00:00Z", "/p", 200, 100),
-        ]);
+        let a = write_jsonl(
+            tmp.path(),
+            "a.jsonl",
+            &[&assistant(
+                "shared",
+                "claude-opus-4-7",
+                "2026-04-05T12:00:00Z",
+                "/p",
+                100,
+                50,
+            )],
+        );
+        let b = write_jsonl(
+            tmp.path(),
+            "b.jsonl",
+            &[
+                &assistant(
+                    "shared",
+                    "claude-opus-4-7",
+                    "2026-04-05T12:00:00Z",
+                    "/p",
+                    100,
+                    50,
+                ),
+                &assistant(
+                    "unique",
+                    "claude-opus-4-7",
+                    "2026-04-05T12:00:00Z",
+                    "/p",
+                    200,
+                    100,
+                ),
+            ],
+        );
         let r = aggregate_daily(&[a, b], &Filters::default());
         let d = NaiveDate::from_ymd_opt(2026, 4, 5).unwrap();
         assert_eq!(r.rows[&d].records, 2);
@@ -303,12 +362,30 @@ mod tests {
     #[test]
     fn malformed_lines_do_not_abort_file() {
         let tmp = tempfile::tempdir().unwrap();
-        let path = write_jsonl(tmp.path(), "s.jsonl", &[
-            "not json",
-            &assistant("m1", "claude-opus-4-7", "2026-04-05T12:00:00Z", "/p", 1000, 500),
-            r#"{"type":"user","content":"ok"}"#,
-            &assistant("m2", "claude-opus-4-7", "2026-04-05T13:00:00Z", "/p", 2000, 1000),
-        ]);
+        let path = write_jsonl(
+            tmp.path(),
+            "s.jsonl",
+            &[
+                "not json",
+                &assistant(
+                    "m1",
+                    "claude-opus-4-7",
+                    "2026-04-05T12:00:00Z",
+                    "/p",
+                    1000,
+                    500,
+                ),
+                r#"{"type":"user","content":"ok"}"#,
+                &assistant(
+                    "m2",
+                    "claude-opus-4-7",
+                    "2026-04-05T13:00:00Z",
+                    "/p",
+                    2000,
+                    1000,
+                ),
+            ],
+        );
         let r = aggregate_daily(&[path], &Filters::default());
         let d = NaiveDate::from_ymd_opt(2026, 4, 5).unwrap();
         assert_eq!(r.rows[&d].records, 2);
@@ -318,9 +395,18 @@ mod tests {
     #[test]
     fn unknown_model_tokens_counted_but_cost_zero() {
         let tmp = tempfile::tempdir().unwrap();
-        let path = write_jsonl(tmp.path(), "s.jsonl", &[
-            &assistant("m1", "claude-mystery-99", "2026-04-05T12:00:00Z", "/p", 1_000_000, 1_000_000),
-        ]);
+        let path = write_jsonl(
+            tmp.path(),
+            "s.jsonl",
+            &[&assistant(
+                "m1",
+                "claude-mystery-99",
+                "2026-04-05T12:00:00Z",
+                "/p",
+                1_000_000,
+                1_000_000,
+            )],
+        );
         let r = aggregate_daily(&[path], &Filters::default());
         let d = NaiveDate::from_ymd_opt(2026, 4, 5).unwrap();
         assert_eq!(r.rows[&d].input_tokens, 1_000_000);
@@ -333,12 +419,30 @@ mod tests {
         // If the same unknown-model id appears in two files, it should
         // still only count once — both in records and in unknown_models.
         let tmp = tempfile::tempdir().unwrap();
-        let a = write_jsonl(tmp.path(), "a.jsonl", &[
-            &assistant("dup", "claude-mystery-99", "2026-04-05T12:00:00Z", "/p", 100, 100),
-        ]);
-        let b = write_jsonl(tmp.path(), "b.jsonl", &[
-            &assistant("dup", "claude-mystery-99", "2026-04-05T12:00:00Z", "/p", 100, 100),
-        ]);
+        let a = write_jsonl(
+            tmp.path(),
+            "a.jsonl",
+            &[&assistant(
+                "dup",
+                "claude-mystery-99",
+                "2026-04-05T12:00:00Z",
+                "/p",
+                100,
+                100,
+            )],
+        );
+        let b = write_jsonl(
+            tmp.path(),
+            "b.jsonl",
+            &[&assistant(
+                "dup",
+                "claude-mystery-99",
+                "2026-04-05T12:00:00Z",
+                "/p",
+                100,
+                100,
+            )],
+        );
         let r = aggregate_daily(&[a, b], &Filters::default());
         assert_eq!(r.unknown_models.get("claude-mystery-99"), Some(&1));
     }
@@ -349,28 +453,60 @@ mod tests {
         // Tokens should be counted, cost 0, but it must NOT appear in
         // unknown_models (that's noise to the user).
         let tmp = tempfile::tempdir().unwrap();
-        let path = write_jsonl(tmp.path(), "s.jsonl", &[
-            &assistant("m1", "<synthetic>", "2026-04-05T12:00:00Z", "/p", 500, 100),
-            &assistant("m2", "claude-mystery-99", "2026-04-05T12:00:00Z", "/p", 300, 50),
-        ]);
+        let path = write_jsonl(
+            tmp.path(),
+            "s.jsonl",
+            &[
+                &assistant("m1", "<synthetic>", "2026-04-05T12:00:00Z", "/p", 500, 100),
+                &assistant(
+                    "m2",
+                    "claude-mystery-99",
+                    "2026-04-05T12:00:00Z",
+                    "/p",
+                    300,
+                    50,
+                ),
+            ],
+        );
         let r = aggregate_daily(&[path], &Filters::default());
         let d = NaiveDate::from_ymd_opt(2026, 4, 5).unwrap();
         // Tokens from both records are counted.
         assert_eq!(r.rows[&d].input_tokens, 800);
         assert_eq!(r.rows[&d].records, 2);
         // <synthetic> is silent; mystery-99 warns.
-        assert!(!r.unknown_models.contains_key("<synthetic>"),
-            "got: {:?}", r.unknown_models);
+        assert!(
+            !r.unknown_models.contains_key("<synthetic>"),
+            "got: {:?}",
+            r.unknown_models
+        );
         assert_eq!(r.unknown_models.get("claude-mystery-99"), Some(&1));
     }
 
     #[test]
     fn project_substring_filter() {
         let tmp = tempfile::tempdir().unwrap();
-        let path = write_jsonl(tmp.path(), "s.jsonl", &[
-            &assistant("m1", "claude-opus-4-7", "2026-04-05T12:00:00Z", "/home/alice/proj-a", 100, 100),
-            &assistant("m2", "claude-opus-4-7", "2026-04-05T12:00:00Z", "/home/alice/proj-b", 200, 200),
-        ]);
+        let path = write_jsonl(
+            tmp.path(),
+            "s.jsonl",
+            &[
+                &assistant(
+                    "m1",
+                    "claude-opus-4-7",
+                    "2026-04-05T12:00:00Z",
+                    "/home/alice/proj-a",
+                    100,
+                    100,
+                ),
+                &assistant(
+                    "m2",
+                    "claude-opus-4-7",
+                    "2026-04-05T12:00:00Z",
+                    "/home/alice/proj-b",
+                    200,
+                    200,
+                ),
+            ],
+        );
         let filters = Filters {
             project_substring: Some("proj-a".into()),
             ..Default::default()
@@ -384,11 +520,36 @@ mod tests {
     #[test]
     fn since_until_filter() {
         let tmp = tempfile::tempdir().unwrap();
-        let path = write_jsonl(tmp.path(), "s.jsonl", &[
-            &assistant("m1", "claude-opus-4-7", "2026-04-03T12:00:00Z", "/p", 100, 100),
-            &assistant("m2", "claude-opus-4-7", "2026-04-05T12:00:00Z", "/p", 100, 100),
-            &assistant("m3", "claude-opus-4-7", "2026-04-07T12:00:00Z", "/p", 100, 100),
-        ]);
+        let path = write_jsonl(
+            tmp.path(),
+            "s.jsonl",
+            &[
+                &assistant(
+                    "m1",
+                    "claude-opus-4-7",
+                    "2026-04-03T12:00:00Z",
+                    "/p",
+                    100,
+                    100,
+                ),
+                &assistant(
+                    "m2",
+                    "claude-opus-4-7",
+                    "2026-04-05T12:00:00Z",
+                    "/p",
+                    100,
+                    100,
+                ),
+                &assistant(
+                    "m3",
+                    "claude-opus-4-7",
+                    "2026-04-07T12:00:00Z",
+                    "/p",
+                    100,
+                    100,
+                ),
+            ],
+        );
         let filters = Filters {
             since: Some(NaiveDate::from_ymd_opt(2026, 4, 4).unwrap()),
             until: Some(NaiveDate::from_ymd_opt(2026, 4, 6).unwrap()),
@@ -396,15 +557,26 @@ mod tests {
         };
         let r = aggregate_daily(&[path], &filters);
         assert_eq!(r.rows.len(), 1);
-        assert!(r.rows.contains_key(&NaiveDate::from_ymd_opt(2026, 4, 5).unwrap()));
+        assert!(r
+            .rows
+            .contains_key(&NaiveDate::from_ymd_opt(2026, 4, 5).unwrap()));
     }
 
     #[test]
     fn cost_is_computed_when_model_is_known() {
         let tmp = tempfile::tempdir().unwrap();
-        let path = write_jsonl(tmp.path(), "s.jsonl", &[
-            &assistant("m1", "claude-opus-4-7", "2026-04-05T12:00:00Z", "/p", 1_000_000, 1_000_000),
-        ]);
+        let path = write_jsonl(
+            tmp.path(),
+            "s.jsonl",
+            &[&assistant(
+                "m1",
+                "claude-opus-4-7",
+                "2026-04-05T12:00:00Z",
+                "/p",
+                1_000_000,
+                1_000_000,
+            )],
+        );
         let r = aggregate_daily(&[path], &Filters::default());
         let d = NaiveDate::from_ymd_opt(2026, 4, 5).unwrap();
         assert!((r.rows[&d].cost_usd - 30.0).abs() < 1e-6);
@@ -424,12 +596,30 @@ mod tests {
         // Two files with the exact same record — the common backup/rsync
         // case. Must stay at records=1 with zero divergence flags.
         let tmp = tempfile::tempdir().unwrap();
-        let a = write_jsonl(tmp.path(), "a.jsonl", &[
-            &assistant("dup", "claude-opus-4-7", "2026-04-05T12:00:00Z", "/p", 100, 50),
-        ]);
-        let b = write_jsonl(tmp.path(), "b.jsonl", &[
-            &assistant("dup", "claude-opus-4-7", "2026-04-05T12:00:00Z", "/p", 100, 50),
-        ]);
+        let a = write_jsonl(
+            tmp.path(),
+            "a.jsonl",
+            &[&assistant(
+                "dup",
+                "claude-opus-4-7",
+                "2026-04-05T12:00:00Z",
+                "/p",
+                100,
+                50,
+            )],
+        );
+        let b = write_jsonl(
+            tmp.path(),
+            "b.jsonl",
+            &[&assistant(
+                "dup",
+                "claude-opus-4-7",
+                "2026-04-05T12:00:00Z",
+                "/p",
+                100,
+                50,
+            )],
+        );
         let r = aggregate_daily(&[a, b], &Filters::default());
         let d = NaiveDate::from_ymd_opt(2026, 4, 5).unwrap();
         assert_eq!(r.rows[&d].records, 1);
@@ -442,10 +632,28 @@ mod tests {
         // tokens — simulates a corrupted session log. The counter must
         // fire and the first record must win in totals.
         let tmp = tempfile::tempdir().unwrap();
-        let path = write_jsonl(tmp.path(), "s.jsonl", &[
-            &assistant("x", "claude-opus-4-7", "2026-04-05T12:00:00Z", "/p", 100, 50),
-            &assistant("x", "claude-opus-4-7", "2026-04-05T12:00:00Z", "/p", 999, 999),
-        ]);
+        let path = write_jsonl(
+            tmp.path(),
+            "s.jsonl",
+            &[
+                &assistant(
+                    "x",
+                    "claude-opus-4-7",
+                    "2026-04-05T12:00:00Z",
+                    "/p",
+                    100,
+                    50,
+                ),
+                &assistant(
+                    "x",
+                    "claude-opus-4-7",
+                    "2026-04-05T12:00:00Z",
+                    "/p",
+                    999,
+                    999,
+                ),
+            ],
+        );
         let r = aggregate_daily(&[path], &Filters::default());
         let d = NaiveDate::from_ymd_opt(2026, 4, 5).unwrap();
         assert_eq!(r.rows[&d].records, 1);
@@ -460,12 +668,30 @@ mod tests {
         // divergence counter is deterministic because it fires on every
         // collision regardless of which side wins.
         let tmp = tempfile::tempdir().unwrap();
-        let a = write_jsonl(tmp.path(), "a.jsonl", &[
-            &assistant("x", "claude-opus-4-7", "2026-04-05T12:00:00Z", "/p", 100, 50),
-        ]);
-        let b = write_jsonl(tmp.path(), "b.jsonl", &[
-            &assistant("x", "claude-opus-4-7", "2026-04-05T12:00:00Z", "/p", 200, 50),
-        ]);
+        let a = write_jsonl(
+            tmp.path(),
+            "a.jsonl",
+            &[&assistant(
+                "x",
+                "claude-opus-4-7",
+                "2026-04-05T12:00:00Z",
+                "/p",
+                100,
+                50,
+            )],
+        );
+        let b = write_jsonl(
+            tmp.path(),
+            "b.jsonl",
+            &[&assistant(
+                "x",
+                "claude-opus-4-7",
+                "2026-04-05T12:00:00Z",
+                "/p",
+                200,
+                50,
+            )],
+        );
         let r = aggregate_daily(&[a, b], &Filters::default());
         let d = NaiveDate::from_ymd_opt(2026, 4, 5).unwrap();
         assert_eq!(r.rows[&d].records, 1);

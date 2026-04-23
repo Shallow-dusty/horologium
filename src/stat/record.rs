@@ -145,7 +145,10 @@ mod tests {
         assert_eq!(r.cache_creation_5m_tokens, 33627);
         assert_eq!(r.cache_creation_1h_tokens, 0);
         assert_eq!(r.cache_read_tokens, 0);
-        assert_eq!(r.cwd.as_deref(), Some("/home/shallow/04.AI-Prism/00.Agent-CLI"));
+        assert_eq!(
+            r.cwd.as_deref(),
+            Some("/home/shallow/04.AI-Prism/00.Agent-CLI")
+        );
         assert_eq!(r.timestamp.to_rfc3339(), "2026-04-05T07:31:14.156+00:00");
     }
 
