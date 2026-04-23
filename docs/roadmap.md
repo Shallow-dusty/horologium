@@ -2,7 +2,7 @@
 
 按"先热路径、后冷路径"顺序迭代。每个 phase 有明确出口条件。
 
-## Phase 1 — `status`（状态栏渲染） ✅ MVP
+## Phase 1 — `status`（状态栏渲染） ✅ v1.0
 
 **目标**：替代 `~/.claude/statusline.sh` 的 bash 实现，冷启动 <20ms。
 
@@ -12,18 +12,29 @@
 | 5h / 7d 倒计时 + 百分比 + 三档颜色 | ✅ |
 | 单测覆盖 `fmt_countdown` | ✅ |
 | `cargo build --release` 产物可直接配到 settings.json | ✅ |
-| 冷启动 benchmark（`hyperfine` 对比 bash 与 ccusage statusline） | ✅ 2026-04-22：Horologium 1.9 ms ± 0.5 / bash statusline.sh 35.2 ms ± 2.4，**18–35x 提速** |
+| 冷启动 benchmark（`hyperfine` 对比 bash 与 ccusage statusline） | ✅ 2026-04-22：Horologium 1.9 ms ± 0.5 / bash statusline.sh 35.2 ms ± 2.4，**18–35x 提速**；2026-04-23 全功能模式 732 µs ± 229 |
 | Codex 交叉审查 + parity 修复 | ✅ 2026-04-22：修 4 项（rate pct 四舍五入 / context 0 默认 / cost 0 默认 / rate 门控对齐）+ basename edge case，测试从 1 扩到 6 |
-| git branch / modified 计数 | ⏳ |
-| Powerline 分段渲染开关（`--powerline`）| ⏳ |
-| 多行输出支持（`--multiline`）| ⏳ |
-| OSC 8 clickable links（git 远端 / cwd） | ⏳ |
+| git branch（modified 计数延后到 Phase 3 widget） | ✅ 2026-04-23：手写 `.git/HEAD` 解析，支持 worktree，零新依赖 |
+| Powerline 分段渲染开关（`--powerline`）| ✅ 2026-04-23：Segment struct + 256 色调色板 + U+E0B0 箭头 |
+| 多行输出支持（`--multiline`）| ✅ 2026-04-23：row 分组，与 --powerline 正交组合 |
+| OSC 8 clickable links（git 远端 / cwd） | ✅ 2026-04-23：`--hyperlinks` 开关，dir → `file://`，branch → origin web URL |
 
 **出口条件**：日常用 Horologium 的 `status` 替代当前 bash 脚本 ≥ 2 周无退化。
 
+## 版本号策略
+
+- **`vX.0`**：新 Phase 完成（如 v1.0 = Phase 1 完成，v2.0 = Phase 2 完成）
+- **`vX.Y`**：小 bug 修复 / 小功能增强（Y 递增）
+
 ## Phase 2 — `stat`（用量解析）
 
-**目标**：替代 `npx ccusage daily/session/blocks` 的主要用法，解析速度 ≥ ccusage 5x。
+**目标**：面向 **外部 pipeline / 批处理** 的用量 CLI，不做 ccusage 的机械翻译。
+交互式查看场景已被 Claude Code 2.1.118 的 `/usage` TUI 吸收；Horologium `stat` 的差异化是：
+
+- 跨会话 / 跨项目聚合（TUI 只看当前会话）
+- pipe-friendly 输出（CSV / JSON / TSV）
+- shell 脚本 / CI 集成（返回码、退出语义）
+- 长周期趋势（日 / 周 / 月 rollup）
 
 | 里程碑 | 状态 |
 |---|---|
@@ -80,3 +91,8 @@
 | 2026-04-22 | Phase 3 TUI 用 ratatui 而非 dialoguer / inquire | 更大自由度，Powerline 预览需要 |
 | 2026-04-22 | `status.rs` 内的 clap `#[derive(Args)]` 结构命名为 `StatusArgs` 而非 `Args` | 避免与 `clap::Args` trait 同名冲突 |
 | 2026-04-22 | `references/` 目录存放 ccusage / ccstatusline 浅克隆，加入 `.gitignore` | Phase 2 开发需要对照其 JSONL 解析字段口径 |
+| 2026-04-23 | git branch 走手写 `.git/HEAD` 解析，不引入 `git2` / `gix` / subprocess | 冷启动 + 最小依赖优先；`.git/HEAD` 格式稳定，<50 行即可 bash parity（含 worktree） |
+| 2026-04-23 | Phase 1 "modified 计数" 从本期砍掉，延后到 Phase 3 TUI widget | 手写实现需要 git index parser，成本高于收益；TUI widget 阶段可以用更好的 UX 呈现 |
+| 2026-04-23 | 核查 CC 2.1.118 changelog：statusline stdin schema 与调用约定均未变，Phase 1 无需迁移 | `/cost` + `/stats` 合并为 `/usage` 属于 TUI 命令整合，与状态栏输入源解耦 |
+| 2026-04-23 | Phase 2 重定位：从"ccusage 的 Rust 重写"改为"外部 pipeline / 批处理 CLI" | 交互式查看已被 CC 2.1.118 的 `/usage` TUI 吸收；外部 CLI 的差异化在跨会话聚合、pipe-friendly 输出、CI 集成 |
+| 2026-04-23 | 版本号策略：vX.0 = 新 Phase 完成，vX.Y = 小 bug/小增强 | 用户显式指定：v1.0 是 Phase 1 收尾的里程碑版本 |

@@ -21,7 +21,7 @@ Horologium 做三件事：
 
 ## 当前状态
 
-- Phase 1 `status`：骨架已搭，MVP 已可用（见下方用法）。
+- Phase 1 `status`：**v1.0 已完成**。全功能模式冷启动 <1 ms（比 bash 35 ms 快 35×+）。
 - Phase 2 `stat`：未实现。
 - Phase 3 `configure`：未实现。
 
@@ -55,13 +55,27 @@ cargo install --path .
 
 ## 状态栏输出示例
 
+默认 plain 模式：
+
 ```
-Opus  00.Agent-CLI  15%  $1.23  5h:75%⏳2h14m  7d:92%⏳3d5h
-                                    ↑ 黄          ↑ 红
+Opus 4.7  01.Horologium  main  15%  $1.23  5h:75%⏳2h14m  7d:92%⏳3d5h
+                                                ↑ 黄          ↑ 红
 ```
 
 颜色阈值：`<70%` 绿 / `70-89%` 黄 / `>=90%` 红。
 倒计时格式：`Xd Yh` / `Xh Ym` / `Ym`，到点显示 `reset`。
+
+## 渲染开关
+
+`horologium status` 支持三个正交的渲染 flag，可自由组合：
+
+| flag | 效果 |
+|---|---|
+| `--powerline` | 每段带背景色块 + U+E0B0 三角箭头分隔（需 Powerline/Nerd Font） |
+| `--multiline` | 输出两行：第一行身份（model / dir / branch），第二行用量（ctx% / cost / 5h / 7d） |
+| `--hyperlinks` | dir 段和 branch 段包一层 OSC 8 超链接——dir 跳 `file://...`，branch 跳 git origin 的 web URL；不支持 OSC 8 的终端自动忽略 |
+
+示例：`horologium status --powerline --multiline --hyperlinks`
 
 ## 与 `statusline.sh` 的 parity 承诺
 
@@ -78,7 +92,7 @@ Horologium 对标 `~/.claude/statusline.sh` 的行为，在下列条件下保证
 |---|---|
 | 分隔符空白 | Rust 统一用 2 空格 `join`；bash 原版在 model→dir 间用 3 空格，其他 2 空格或 1 空格 |
 | ANSI reset | owo-colors 用 `\e[39m`（default fg），bash 用 `\e[0m`（all reset），渲染效果相同 |
-| Git branch | bash 会插 branch 段，Rust 尚未实现（Phase 1 TODO，见 `docs/roadmap.md`）|
+| Git branch 实现 | bash 用 `git branch --show-current` subprocess；Rust 手动解析 `.git/HEAD`（零依赖、含 worktree 支持），行为一致 |
 
 ## 技术栈
 

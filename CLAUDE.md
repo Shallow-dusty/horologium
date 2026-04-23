@@ -10,9 +10,15 @@ Claude Code 状态栏与用量解析的统一 Rust CLI。
 
 ## 当前阶段
 
-Phase 1 MVP 已完成 + Codex 审查并修复：`horologium status` 可读 stdin JSON、输出含 5h/7d 倒计时 + 颜色的状态栏，与 `~/.claude/statusline.sh` 4 种边界输入下输出一致。冷启动 1.9ms（bash 35ms → 18-35x 提速）。6 个单元测试覆盖 `fmt_countdown` / `basename` / `format_window` 的关键分支。
+**Phase 1 v1.0 已完成**（2026-04-23）。`horologium status` 支持：
+- 默认 plain 模式：bash statusline.sh 的 parity 替代（含 git branch）
+- `--powerline`：U+E0B0 箭头分隔 + 256 色块
+- `--multiline`：身份行 + 用量行分开
+- `--hyperlinks`：dir / branch 段 OSC 8 可点击
 
-下一步建议参考 `docs/roadmap.md`。
+全功能模式冷启动 732 µs（bash 35 ms → **45× 提速**）。25 个单元测试。零新依赖：git 走手写 `.git/HEAD` 解析，OSC 8 / 256 色手写 ANSI。
+
+下一步：Phase 2 `stat`（外部 pipeline / 批处理 CLI，非 ccusage 翻译）。参考 `docs/roadmap.md`。
 
 ## 目录结构
 
@@ -20,6 +26,7 @@ Phase 1 MVP 已完成 + Codex 审查并修复：`horologium status` 可读 stdin
 src/
 ├── main.rs       # clap 分派
 ├── status.rs     # Phase 1: 状态栏渲染
+├── git.rs        # .git/HEAD + origin URL 手写解析
 ├── stat.rs       # Phase 2: JSONL 用量分析（未建）
 └── config.rs     # Phase 3: TUI 配置器（未建）
 docs/
@@ -41,6 +48,6 @@ docs/
 
 ## 未完事项备忘
 
-- Phase 1 还缺：benchmark、git branch、Powerline、多行
-- 还未 `git init`，还未建 GitHub 仓库
-- Cargo 依赖未拉取（首次需要 `cargo fetch` 或 `cargo build`）
+- 还未建 GitHub 远程仓库（已 `git init`）
+- 启用 Phase 1 v1.0 后，实际使用 ≥ 2 周以验证"替代 statusline.sh 无退化"出口条件
+- Phase 2 `stat`、Phase 3 `configure` 未启动
