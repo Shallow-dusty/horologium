@@ -393,6 +393,21 @@ mod tests {
     }
 
     #[test]
+    fn find_git_dir_returns_none_when_no_git_ancestor() {
+        // Verifies the `cur.parent()?` termination path: when no .git exists
+        // anywhere on the upward walk, the loop bails at the filesystem root
+        // instead of spinning. Assumes /tmp (and its ancestors) aren't a git
+        // repo, which is true on standard Linux / macOS / WSL layouts.
+        let td = TempDir::new().unwrap();
+        let deep = td.path().join("a/b/c/d/e");
+        std::fs::create_dir_all(&deep).unwrap();
+        assert!(
+            find_git_dir(&deep).is_none(),
+            "should return None when no .git exists on the path to root"
+        );
+    }
+
+    #[test]
     fn current_branch_via_worktree_reads_per_worktree_head() {
         // Worktree HEAD is in the per-worktree gitdir, not the common one.
         let td = TempDir::new().unwrap();
