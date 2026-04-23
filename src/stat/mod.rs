@@ -4,17 +4,19 @@
 //! the local Claude Code session logs, deduplicates by `message.id`, buckets
 //! the surviving records by calendar day (local timezone), multiplies the
 //! token counts against a built-in Anthropic pricing table, and prints a
-//! table or JSON rollup.
+//! table or NDJSON rollup.
 //!
 //! Module layout:
 //! - `walker`    — discover JSONL files under the projects root
 //! - `record`    — parse a line into a normalized `Record`
 //! - `pricing`   — embedded pricing table + cost lookup
 //! - `aggregate` — rayon-driven per-file fold into `BTreeMap<day, Totals>`
-//! - `format`    — render table or JSON
+//! - `format`    — render table or NDJSON
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
+use chrono::NaiveDate;
 use clap::{Args, Subcommand};
+use std::path::PathBuf;
 
 mod aggregate;
 mod format;
@@ -42,7 +44,7 @@ struct DailyArgs {
     /// Inclusive upper bound on record date, YYYY-MM-DD (local tz).
     #[arg(long)]
     until: Option<String>,
-    /// Glob-like substring matched against the project's `cwd` field.
+    /// Case-sensitive substring matched against the record's `cwd`.
     /// Example: `--project Horologium` keeps records whose cwd contains
     /// "Horologium".
     #[arg(long)]
@@ -50,9 +52,9 @@ struct DailyArgs {
     /// Emit one JSON object per row (pipe-friendly) instead of a table.
     #[arg(long)]
     json: bool,
-    /// Override the projects root (default: ~/.claude/projects).
+    /// Override the projects root (default: $HOME/.claude/projects).
     #[arg(long)]
-    root: Option<std::path::PathBuf>,
+    root: Option<PathBuf>,
 }
 
 pub fn run(args: StatArgs) -> Result<()> {
@@ -61,10 +63,89 @@ pub fn run(args: StatArgs) -> Result<()> {
     }
 }
 
-fn daily(_args: DailyArgs) -> Result<()> {
-    // Wired up in a follow-up commit once walker/record/pricing/aggregate
-    // land. Keeping this stub here lets `cargo build` stay green through
-    // the incremental milestones.
-    eprintln!("stat daily: not implemented yet (scaffold only)");
+fn daily(args: DailyArgs) -> Result<()> {
+    let root = resolve_root(args.root.clone())?;
+    let filters = build_filters(&args)?;
+    let paths = walker::find_jsonl(&root);
+    let report = aggregate::aggregate_daily(&paths, &filters);
+    let out = if args.json {
+        format::format_ndjson(&report)
+    } else {
+        format::format_table(&report)
+    };
+    print!("{}", out);
     Ok(())
+}
+
+fn resolve_root(override_path: Option<PathBuf>) -> Result<PathBuf> {
+    if let Some(p) = override_path {
+        return Ok(p);
+    }
+    let home = std::env::var_os("HOME")
+        .ok_or_else(|| anyhow!("$HOME not set; pass --root explicitly"))?;
+    Ok(PathBuf::from(home).join(".claude/projects"))
+}
+
+fn build_filters(args: &DailyArgs) -> Result<aggregate::Filters> {
+    let parse_date = |s: &str| -> Result<NaiveDate> {
+        NaiveDate::parse_from_str(s, "%Y-%m-%d")
+            .map_err(|e| anyhow!("bad date `{}` (expected YYYY-MM-DD): {}", s, e))
+    };
+    Ok(aggregate::Filters {
+        since: args.since.as_deref().map(parse_date).transpose()?,
+        until: args.until.as_deref().map(parse_date).transpose()?,
+        project_substring: args.project.clone(),
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn empty_args() -> DailyArgs {
+        DailyArgs {
+            since: None,
+            until: None,
+            project: None,
+            json: false,
+            root: None,
+        }
+    }
+
+    #[test]
+    fn resolve_root_uses_override_when_set() {
+        let p = resolve_root(Some(PathBuf::from("/custom/root"))).unwrap();
+        assert_eq!(p, PathBuf::from("/custom/root"));
+    }
+
+    #[test]
+    fn build_filters_parses_dates() {
+        let args = DailyArgs {
+            since: Some("2026-04-01".into()),
+            until: Some("2026-04-23".into()),
+            project: Some("Horologium".into()),
+            ..empty_args()
+        };
+        let f = build_filters(&args).unwrap();
+        assert_eq!(f.since, Some(NaiveDate::from_ymd_opt(2026, 4, 1).unwrap()));
+        assert_eq!(f.until, Some(NaiveDate::from_ymd_opt(2026, 4, 23).unwrap()));
+        assert_eq!(f.project_substring.as_deref(), Some("Horologium"));
+    }
+
+    #[test]
+    fn build_filters_errors_on_bad_date() {
+        let args = DailyArgs {
+            since: Some("yesterday".into()),
+            ..empty_args()
+        };
+        assert!(build_filters(&args).is_err());
+    }
+
+    #[test]
+    fn build_filters_defaults_to_none() {
+        let f = build_filters(&empty_args()).unwrap();
+        assert!(f.since.is_none());
+        assert!(f.until.is_none());
+        assert!(f.project_substring.is_none());
+    }
 }

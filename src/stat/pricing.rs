@@ -24,8 +24,6 @@
 //! - `ephemeral_1h` — exactly 2× the 5m rate (not exposed by LiteLLM; hardcoded
 //!   per the published schedule)
 
-#![allow(dead_code)] // wired into aggregate.rs in a later milestone
-
 use crate::stat::record::Record;
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -34,7 +32,6 @@ use std::sync::OnceLock;
 const EMBEDDED_SNAPSHOT: &str = include_str!("../../data/litellm-anthropic-pricing.json");
 
 pub struct PricingRow {
-    pub model_id: String,
     pub input_per_mtok: f64,
     pub output_per_mtok: f64,
     pub cache_write_5m_per_mtok: f64,
@@ -60,7 +57,6 @@ fn load_table() -> HashMap<String, PricingRow> {
     raw.into_iter()
         .map(|(k, p)| {
             let row = PricingRow {
-                model_id: k.clone(),
                 input_per_mtok: p.input_cost_per_token * 1_000_000.0,
                 output_per_mtok: p.output_cost_per_token * 1_000_000.0,
                 cache_write_5m_per_mtok: p.cache_creation_input_token_cost * 1_000_000.0,

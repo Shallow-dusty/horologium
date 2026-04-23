@@ -6,8 +6,6 @@
 //! to the widest cell so rollups from small to production-scale corpora
 //! all align without wrapping.
 
-#![allow(dead_code)] // wired into mod.rs in the next commit
-
 use super::aggregate::Report;
 
 /// Column order, left-to-right.

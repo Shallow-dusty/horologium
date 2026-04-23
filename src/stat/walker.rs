@@ -1,7 +1,5 @@
 //! Discover JSONL files under the Claude Code projects root.
 
-#![allow(dead_code)] // wired into aggregate.rs in a later milestone
-
 use std::path::{Path, PathBuf};
 
 /// Recursively collect every file ending in `.jsonl` under `root`.

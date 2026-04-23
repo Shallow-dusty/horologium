@@ -7,8 +7,6 @@
 //! return `Err`, so callers can count and move on without aborting the
 //! whole corpus scan.
 
-#![allow(dead_code)] // wired into aggregate.rs in a later milestone
-
 use anyhow::{anyhow, Result};
 use chrono::{DateTime, Utc};
 use serde::Deserialize;

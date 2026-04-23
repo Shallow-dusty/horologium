@@ -14,8 +14,6 @@
 //! count). Since per-id dedup happens before bucketing, the unknown-model
 //! warning counts stay consistent with the row counts.
 
-#![allow(dead_code)] // wired into mod.rs in the follow-up commit
-
 use super::pricing::{cost_for_record, lookup};
 use super::record::{parse_line, Record};
 use chrono::{Local, NaiveDate};
