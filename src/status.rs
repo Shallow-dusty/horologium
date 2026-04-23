@@ -286,9 +286,12 @@ fn build_rate_segment(label: &str, w: Option<&Window>, now: i64, row: u8) -> Seg
         Some(w) => (w.used_percentage.unwrap_or(0.0), w.resets_at),
         None => (0.0, None),
     };
-    // Bash `printf '%.0f'` rounds (banker's rounding in some libc, half-away-from-zero
-    // in others). `.round()` in Rust is half-away-from-zero — close enough.
-    let pct_i = pct.round() as i64;
+    // Bash `printf '%.0f'` uses banker's rounding on glibc (IEEE 754 round-to-even):
+    // 70.5 → 70, 90.5 → 90, 71.5 → 72. Matched exactly by f64::round_ties_even
+    // (stable in Rust 1.77+). Prior versions used .round() which is
+    // half-away-from-zero and would give 90.5 → 91, crossing the yellow→red
+    // threshold at a value bash renders as yellow.
+    let pct_i = pct.round_ties_even() as i64;
     let mut body = format!("{}:{}%", label, pct_i);
     if let Some(reset_at) = resets_at {
         body.push_str(&format!("⏳{}", fmt_countdown(reset_at - now)));
@@ -424,6 +427,32 @@ mod tests {
             "expected 90% (rounded), got: {}",
             s.text
         );
+    }
+
+    #[test]
+    fn rate_pct_banker_rounding_matches_bash() {
+        // bash `printf '%.0f'` uses round-to-even. Verify each boundary.
+        for (input, expected) in [
+            (70.5, "5h:70%"), // ties → 70 (even)
+            (71.5, "5h:72%"), // ties → 72 (even)
+            (89.5, "5h:90%"), // ties → 90 (even)
+            (90.5, "5h:90%"), // ties → 90 (even) — CRITICAL: would be 91 under .round()
+            (89.7, "5h:90%"), // not a tie — half-away still correct
+            (89.4, "5h:89%"), // not a tie — half-away still correct
+        ] {
+            let w = Window {
+                used_percentage: Some(input),
+                resets_at: None,
+            };
+            let s = build_rate_segment("5h", Some(&w), 0, 1);
+            assert!(
+                s.text.contains(expected),
+                "for {}, expected '{}' in text but got '{}'",
+                input,
+                expected,
+                s.text
+            );
+        }
     }
 
     #[test]
