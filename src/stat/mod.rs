@@ -90,7 +90,29 @@ fn daily(args: DailyArgs) -> Result<()> {
         format::format_table(&report)
     };
     print!("{}", out);
+
+    // Table mode already inlines these notes in stdout; JSON mode keeps
+    // stdout a clean NDJSON stream, so diagnostics must go to stderr or
+    // a `jq` pipeline would silently hide undercounted-cost warnings.
+    if args.json {
+        emit_diagnostics_to_stderr(&report);
+    }
     Ok(())
+}
+
+fn emit_diagnostics_to_stderr(report: &aggregate::Report) {
+    if report.malformed_lines > 0 {
+        eprintln!("note: {} malformed line(s) skipped", report.malformed_lines);
+    }
+    if !report.unknown_models.is_empty() {
+        eprintln!("note: records with unpriced models (tokens counted, cost excluded):");
+        for (model, count) in report.unknown_models.iter().take(5) {
+            eprintln!("  {} × {}", model, count);
+        }
+        if report.unknown_models.len() > 5 {
+            eprintln!("  … and {} more", report.unknown_models.len() - 5);
+        }
+    }
 }
 
 fn resolve_root(override_path: Option<PathBuf>) -> Result<PathBuf> {
