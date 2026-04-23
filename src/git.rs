@@ -52,10 +52,41 @@ fn parse_head(content: &str) -> Option<String> {
 /// Read `.git/config` and return the `origin` remote URL normalized to an
 /// HTTPS web URL. Returns None if there is no origin or the URL can't be
 /// understood. Used for OSC 8 hyperlinks on the branch segment.
+///
+/// Worktree-aware: linked worktrees store their HEAD in
+/// `<common>/.git/worktrees/<name>/` but `config` only lives in the
+/// common gitdir, reached via the `commondir` pointer file.
 pub fn origin_web_url(cwd: &Path) -> Option<String> {
     let git_dir = find_git_dir(cwd)?;
-    let config = std::fs::read_to_string(git_dir.join("config")).ok()?;
+    let common = resolve_common_dir(&git_dir);
+    let config = std::fs::read_to_string(common.join("config")).ok()?;
     parse_origin_url(&config).map(|u| normalize_remote_url(&u))
+}
+
+/// Return the common gitdir for a given gitdir. For a regular repo it's
+/// the gitdir itself; for a linked worktree it's the path recorded in the
+/// `commondir` pointer file (resolved relative to the worktree gitdir
+/// when it's not absolute).
+fn resolve_common_dir(git_dir: &Path) -> PathBuf {
+    let commondir_file = git_dir.join("commondir");
+    match std::fs::read_to_string(&commondir_file) {
+        Ok(content) => resolve_common_dir_from_content(git_dir, &content),
+        Err(_) => git_dir.to_path_buf(),
+    }
+}
+
+fn resolve_common_dir_from_content(git_dir: &Path, content: &str) -> PathBuf {
+    match content.lines().next().map(str::trim) {
+        Some(first) if !first.is_empty() => {
+            let p = PathBuf::from(first);
+            if p.is_absolute() {
+                p
+            } else {
+                git_dir.join(p)
+            }
+        }
+        _ => git_dir.to_path_buf(),
+    }
 }
 
 fn parse_origin_url(config: &str) -> Option<String> {
@@ -185,5 +216,35 @@ mod tests {
     fn origin_config_parse_no_origin() {
         let config = "[core]\n\trepositoryformatversion = 0\n";
         assert_eq!(parse_origin_url(config), None);
+    }
+
+    #[test]
+    fn commondir_relative_resolves_against_gitdir() {
+        let git_dir = Path::new("/tmp/main-repo/.git/worktrees/feat");
+        let resolved = resolve_common_dir_from_content(git_dir, "../..\n");
+        assert_eq!(
+            resolved,
+            PathBuf::from("/tmp/main-repo/.git/worktrees/feat/../..")
+        );
+    }
+
+    #[test]
+    fn commondir_absolute_is_used_as_is() {
+        let git_dir = Path::new("/anywhere");
+        let resolved = resolve_common_dir_from_content(git_dir, "/tmp/main-repo/.git\n");
+        assert_eq!(resolved, PathBuf::from("/tmp/main-repo/.git"));
+    }
+
+    #[test]
+    fn commondir_empty_falls_back_to_gitdir() {
+        let git_dir = Path::new("/tmp/x/.git");
+        assert_eq!(
+            resolve_common_dir_from_content(git_dir, ""),
+            PathBuf::from("/tmp/x/.git")
+        );
+        assert_eq!(
+            resolve_common_dir_from_content(git_dir, "\n"),
+            PathBuf::from("/tmp/x/.git")
+        );
     }
 }
