@@ -135,10 +135,16 @@ fn build_filters(args: &DailyArgs) -> Result<aggregate::Filters> {
         NaiveDate::parse_from_str(s, "%Y-%m-%d")
             .map_err(|e| anyhow!("bad date `{}` (expected YYYY-MM-DD): {}", s, e))
     };
+    // An empty `--project ""` would otherwise match every cwd (including
+    // records with no cwd via `unwrap_or("")` inside the filter), which
+    // contradicts the documented "no cwd never matches" semantics. Treat
+    // empty as absent so users who accidentally pass `--project ''` get
+    // the same result as omitting the flag.
+    let project_substring = args.project.clone().filter(|s| !s.is_empty());
     Ok(aggregate::Filters {
         since: args.since.as_deref().map(parse_date).transpose()?,
         until: args.until.as_deref().map(parse_date).transpose()?,
-        project_substring: args.project.clone(),
+        project_substring,
     })
 }
 
@@ -191,5 +197,15 @@ mod tests {
         assert!(f.since.is_none());
         assert!(f.until.is_none());
         assert!(f.project_substring.is_none());
+    }
+
+    #[test]
+    fn build_filters_treats_empty_project_as_none() {
+        let args = DailyArgs {
+            project: Some(String::new()),
+            ..empty_args()
+        };
+        let f = build_filters(&args).unwrap();
+        assert!(f.project_substring.is_none(), "empty --project should normalize to None");
     }
 }
