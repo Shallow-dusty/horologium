@@ -78,6 +78,12 @@ pub fn run(_args: StatusArgs) -> Result<()> {
     }
     if let Some(dir) = data.workspace.current_dir.as_deref() {
         segments.push(basename(dir).to_string());
+        // Mirror bash `git branch --show-current 2>/dev/null`: emit branch
+        // only when attached to a local branch; detached HEAD / non-git dir
+        // yields nothing.
+        if let Some(branch) = crate::git::current_branch(Path::new(dir)) {
+            segments.push(branch);
+        }
     }
 
     // Context % and cost are ALWAYS rendered; absent values default to 0
