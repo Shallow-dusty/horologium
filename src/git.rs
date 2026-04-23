@@ -291,4 +291,125 @@ mod tests {
             PathBuf::from("/tmp/x/.git")
         );
     }
+
+    // --- IO tests (use real tempdirs to exercise find_git_dir + origin_web_url) ---
+
+    use tempfile::TempDir;
+
+    fn write_repo(root: &Path, head_ref: &str, config: Option<&str>) {
+        let git = root.join(".git");
+        std::fs::create_dir_all(&git).unwrap();
+        std::fs::write(git.join("HEAD"), format!("ref: refs/heads/{}\n", head_ref)).unwrap();
+        if let Some(cfg) = config {
+            std::fs::write(git.join("config"), cfg).unwrap();
+        }
+    }
+
+    #[test]
+    fn find_git_dir_at_repo_root() {
+        let td = TempDir::new().unwrap();
+        write_repo(td.path(), "main", None);
+        let found = find_git_dir(td.path()).unwrap();
+        assert_eq!(found, td.path().join(".git"));
+    }
+
+    #[test]
+    fn find_git_dir_searches_upward_from_subdirectory() {
+        let td = TempDir::new().unwrap();
+        write_repo(td.path(), "main", None);
+        let nested = td.path().join("a/b/c/d");
+        std::fs::create_dir_all(&nested).unwrap();
+        let found = find_git_dir(&nested).unwrap();
+        assert_eq!(found, td.path().join(".git"));
+    }
+
+    #[test]
+    fn find_git_dir_handles_worktree_absolute_pointer() {
+        let td = TempDir::new().unwrap();
+        let real_gitdir = td.path().join("main/.git/worktrees/feat");
+        std::fs::create_dir_all(&real_gitdir).unwrap();
+        let wt = td.path().join("linked");
+        std::fs::create_dir_all(&wt).unwrap();
+        std::fs::write(
+            wt.join(".git"),
+            format!("gitdir: {}\n", real_gitdir.display()),
+        )
+        .unwrap();
+        let found = find_git_dir(&wt).unwrap();
+        assert_eq!(found, real_gitdir);
+    }
+
+    #[test]
+    fn find_git_dir_handles_worktree_relative_pointer() {
+        let td = TempDir::new().unwrap();
+        let real_gitdir = td.path().join("main/.git/worktrees/feat");
+        std::fs::create_dir_all(&real_gitdir).unwrap();
+        let wt = td.path().join("linked");
+        std::fs::create_dir_all(&wt).unwrap();
+        // Relative gitdir from the worktree dir.
+        std::fs::write(wt.join(".git"), "gitdir: ../main/.git/worktrees/feat\n").unwrap();
+        let found = find_git_dir(&wt).unwrap();
+        assert_eq!(found, wt.join("../main/.git/worktrees/feat"));
+    }
+
+    #[test]
+    fn origin_web_url_end_to_end_regular_repo() {
+        let td = TempDir::new().unwrap();
+        write_repo(
+            td.path(),
+            "main",
+            Some("[remote \"origin\"]\n\turl = git@github.com:foo/bar.git\n"),
+        );
+        let url = origin_web_url(td.path()).unwrap();
+        assert_eq!(url, "https://github.com/foo/bar");
+    }
+
+    #[test]
+    fn origin_web_url_via_worktree_commondir() {
+        let td = TempDir::new().unwrap();
+        // Main repo with origin in config.
+        let main = td.path().join("main");
+        std::fs::create_dir_all(main.join(".git/worktrees/feat")).unwrap();
+        std::fs::write(
+            main.join(".git/config"),
+            "[remote \"origin\"]\n\turl = https://github.com/x/y.git\n",
+        )
+        .unwrap();
+        // Per-worktree gitdir: HEAD + commondir pointing back to main .git.
+        let wt_gitdir = main.join(".git/worktrees/feat");
+        std::fs::write(wt_gitdir.join("HEAD"), "ref: refs/heads/feat\n").unwrap();
+        std::fs::write(wt_gitdir.join("commondir"), "../..\n").unwrap();
+        // Worktree directory: .git is a file pointing at the per-worktree gitdir.
+        let wt = td.path().join("wt");
+        std::fs::create_dir_all(&wt).unwrap();
+        std::fs::write(
+            wt.join(".git"),
+            format!("gitdir: {}\n", wt_gitdir.display()),
+        )
+        .unwrap();
+        // Verifies the full pipeline: find_git_dir → resolve_common_dir → config.
+        let url = origin_web_url(&wt).unwrap();
+        assert_eq!(url, "https://github.com/x/y");
+    }
+
+    #[test]
+    fn current_branch_via_worktree_reads_per_worktree_head() {
+        // Worktree HEAD is in the per-worktree gitdir, not the common one.
+        let td = TempDir::new().unwrap();
+        let main = td.path().join("main");
+        std::fs::create_dir_all(main.join(".git/worktrees/feat")).unwrap();
+        std::fs::write(main.join(".git/HEAD"), "ref: refs/heads/main\n").unwrap();
+        let wt_gitdir = main.join(".git/worktrees/feat");
+        std::fs::write(wt_gitdir.join("HEAD"), "ref: refs/heads/feat\n").unwrap();
+        std::fs::write(wt_gitdir.join("commondir"), "../..\n").unwrap();
+        let wt = td.path().join("wt");
+        std::fs::create_dir_all(&wt).unwrap();
+        std::fs::write(
+            wt.join(".git"),
+            format!("gitdir: {}\n", wt_gitdir.display()),
+        )
+        .unwrap();
+        // Should pick up the per-worktree branch, not "main".
+        assert_eq!(current_branch(&wt).as_deref(), Some("feat"));
+    }
 }
