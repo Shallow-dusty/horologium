@@ -10,15 +10,17 @@ Claude Code 状态栏与用量解析的统一 Rust CLI。
 
 ## 当前阶段
 
-**Phase 1 v1.0 已完成**（2026-04-23）。`horologium status` 支持：
+**Phase 1 v1.1 已完成**（2026-04-23）。`horologium status` 支持：
 - 默认 plain 模式：bash statusline.sh 的 parity 替代（含 git branch）
 - `--powerline`：U+E0B0 箭头分隔 + 256 色块
 - `--multiline`：身份行 + 用量行分开
 - `--hyperlinks`：dir / branch 段 OSC 8 可点击
 
-全功能模式冷启动 732 µs（bash 35 ms → **45× 提速**）。25 个单元测试。零新依赖：git 走手写 `.git/HEAD` 解析，OSC 8 / 256 色手写 ANSI。
+全功能模式冷启动 <1 ms（bash 35 ms → **45× 提速**）。43 个单元测试（含 7 个 worktree / IO 集成测试）。`tempfile` 仅作 dev-dependency；release 二进制依赖不变（clap / serde / serde_json / anyhow / owo-colors）。git 走手写 `.git/HEAD` + `commondir` 解析（worktree-aware），OSC 8 / 256 色 / percent-encoding 全手写 ANSI。
 
-下一步：Phase 2 `stat`（外部 pipeline / 批处理 CLI，非 ccusage 翻译）。参考 `docs/roadmap.md`。
+v1.1 修了 v1.0 审出来的 7 项：bash banker's rounding parity、worktree origin_web_url、ssh:// 多变体归一化、URL percent-encoding、hyperlinks 关闭时 IO 短路、IO 级测试覆盖、README 文档口径。详见 `docs/roadmap.md` 决策日志。
+
+下一步：Phase 2 `stat`（外部 pipeline / 批处理 CLI，非 ccusage 翻译）。
 
 ## 目录结构
 

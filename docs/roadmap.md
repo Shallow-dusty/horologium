@@ -12,7 +12,7 @@
 | 5h / 7d 倒计时 + 百分比 + 三档颜色 | ✅ |
 | 单测覆盖 `fmt_countdown` | ✅ |
 | `cargo build --release` 产物可直接配到 settings.json | ✅ |
-| 冷启动 benchmark（`hyperfine` 对比 bash 与 ccusage statusline） | ✅ 2026-04-22：Horologium 1.9 ms ± 0.5 / bash statusline.sh 35.2 ms ± 2.4，**18–35x 提速**；2026-04-23 全功能模式 732 µs ± 229 |
+| 冷启动 benchmark（`hyperfine` 对比 bash 与 ccusage statusline） | ✅ 2026-04-22：Horologium 1.9 ms ± 0.5 / bash statusline.sh 35.2 ms ± 2.4；v1.0 全功能 732 µs；v1.1 默认 560 µs / 全功能 478 µs（Fix B 跳过 IO 后 ~30% 再提速）|
 | Codex 交叉审查 + parity 修复 | ✅ 2026-04-22：修 4 项（rate pct 四舍五入 / context 0 默认 / cost 0 默认 / rate 门控对齐）+ basename edge case，测试从 1 扩到 6 |
 | git branch（modified 计数延后到 Phase 3 widget） | ✅ 2026-04-23：手写 `.git/HEAD` 解析，支持 worktree，零新依赖 |
 | Powerline 分段渲染开关（`--powerline`）| ✅ 2026-04-23：Segment struct + 256 色调色板 + U+E0B0 箭头 |
@@ -96,3 +96,8 @@
 | 2026-04-23 | 核查 CC 2.1.118 changelog：statusline stdin schema 与调用约定均未变，Phase 1 无需迁移 | `/cost` + `/stats` 合并为 `/usage` 属于 TUI 命令整合，与状态栏输入源解耦 |
 | 2026-04-23 | Phase 2 重定位：从"ccusage 的 Rust 重写"改为"外部 pipeline / 批处理 CLI" | 交互式查看已被 CC 2.1.118 的 `/usage` TUI 吸收；外部 CLI 的差异化在跨会话聚合、pipe-friendly 输出、CI 集成 |
 | 2026-04-23 | 版本号策略：vX.0 = 新 Phase 完成，vX.Y = 小 bug/小增强 | 用户显式指定：v1.0 是 Phase 1 收尾的里程碑版本 |
+| 2026-04-23 | v1.0 发布后立即跑 Claude + Codex 双审核；共识 3 MUST + 4 SHOULD + 2 NIT 合并为 v1.1 | Phase 1 承诺 bash parity，review 抓出 `90.5` 跨色档等真实 parity bug，不在用户轮班时积压 |
+| 2026-04-23 | 百分比取整改用 `f64::round_ties_even`（Rust 1.77+）而非手写 banker's rounding | 标准库直达 IEEE 754 round-to-even，对齐 glibc `printf '%.0f'` 行为；顺带把 MSRV 升到 1.77 |
+| 2026-04-23 | worktree config 查询走 `commondir` 指针解析；factor 出纯函数便于单测 | linked worktree 的 per-wt gitdir 不含 config；纯函数 `resolve_common_dir_from_content` 让单测不需要真实 worktree 布局 |
+| 2026-04-23 | `tempfile` 加入 `[dev-dependencies]` 以便写 IO 测试；release 依赖不变 | v1.0 的 git.rs 测试全是字符串层级，IO pipeline 无证据；dev-dep 不影响冷启动 |
+| 2026-04-23 | `--hyperlinks` 关闭时短路 `origin_web_url()` 与 `file://` URL 合成 | 冷启动热路径不必要的 IO（读 `.git/config`）在默认模式下是纯浪费 |
