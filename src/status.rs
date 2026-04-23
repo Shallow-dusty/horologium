@@ -121,7 +121,7 @@ pub fn run(args: StatusArgs) -> Result<()> {
         .context("read stdin")?;
     let data: Input = serde_json::from_str(&buf).context("parse stdin JSON")?;
 
-    let segments = build_segments(&data);
+    let segments = build_segments(&data, args.hyperlinks);
 
     let opts = RenderOpts {
         powerline: args.powerline,
@@ -166,7 +166,7 @@ fn max_row(segs: &[Segment]) -> u8 {
     segs.iter().map(|s| s.row).max().unwrap_or(0)
 }
 
-fn build_segments(data: &Input) -> Vec<Segment> {
+fn build_segments(data: &Input, hyperlinks: bool) -> Vec<Segment> {
     // Row layout for --multiline:
     //   row 0 = identity (model / dir / branch)
     //   row 1 = usage    (ctx% / cost / 5h / 7d)
@@ -184,7 +184,14 @@ fn build_segments(data: &Input) -> Vec<Segment> {
         ));
     }
     if let Some(dir) = data.workspace.current_dir.as_deref() {
-        let dir_link = Some(format!("file://{}", encode_path_for_url(dir)));
+        // Skip link synthesis + git config IO when hyperlinks are off — this
+        // keeps the cold-start path free of `.git/config` reads in the
+        // default `horologium status` invocation.
+        let dir_link = if hyperlinks {
+            Some(format!("file://{}", encode_path_for_url(dir)))
+        } else {
+            None
+        };
         segs.push(
             Segment::fixed(
                 basename(dir).to_string(),
@@ -198,7 +205,11 @@ fn build_segments(data: &Input) -> Vec<Segment> {
         // only when attached to a local branch; detached HEAD / non-git dir
         // yields nothing.
         if let Some(branch) = crate::git::current_branch(Path::new(dir)) {
-            let branch_link = crate::git::origin_web_url(Path::new(dir));
+            let branch_link = if hyperlinks {
+                crate::git::origin_web_url(Path::new(dir))
+            } else {
+                None
+            };
             segs.push(
                 Segment::fixed(branch, PL_BRANCH_BG, PL_BRANCH_FG, ROW_IDENTITY)
                     .with_link(branch_link),
