@@ -114,15 +114,29 @@ fn parse_origin_url(config: &str) -> Option<String> {
 
 fn normalize_remote_url(url: &str) -> String {
     let stripped = url.trim_end_matches(".git");
-    // `git@host:path` (SCP-like) -> `https://host/path`
+    // `git@host:path` (SCP-like) -> `https://host/path`.
     if let Some(rest) = stripped.strip_prefix("git@") {
         if let Some((host, path)) = rest.split_once(':') {
             return format!("https://{}/{}", host, path);
         }
     }
-    // `ssh://git@host/path` -> `https://host/path`
-    if let Some(rest) = stripped.strip_prefix("ssh://git@") {
-        return format!("https://{}", rest);
+    // `ssh://[user@]host[:port]/path` -> `https://host/path`. Strips optional
+    // user prefix (`git@`, `alice@`, etc.) and optional port so the resulting
+    // URL is web-navigable regardless of the underlying git transport config.
+    if let Some(rest) = stripped.strip_prefix("ssh://") {
+        let host_path = rest.split_once('@').map_or(rest, |(_, r)| r);
+        let normalized = match host_path.split_once('/') {
+            Some((host_port, path)) => {
+                let host = host_port.split(':').next().unwrap_or(host_port);
+                format!("{}/{}", host, path)
+            }
+            None => host_path
+                .split(':')
+                .next()
+                .unwrap_or(host_path)
+                .to_string(),
+        };
+        return format!("https://{}", normalized);
     }
     // Already HTTPS (possibly with `.git` suffix, already trimmed).
     stripped.to_string()
@@ -178,6 +192,36 @@ mod tests {
         assert_eq!(
             normalize_remote_url("ssh://git@github.com/shallow/horologium.git"),
             "https://github.com/shallow/horologium"
+        );
+    }
+
+    #[test]
+    fn remote_url_ssh_non_git_user() {
+        // ssh with arbitrary username, not git@
+        assert_eq!(
+            normalize_remote_url("ssh://alice@gitea.example.com/team/repo.git"),
+            "https://gitea.example.com/team/repo"
+        );
+    }
+
+    #[test]
+    fn remote_url_ssh_no_user() {
+        assert_eq!(
+            normalize_remote_url("ssh://gitea.example.com/team/repo.git"),
+            "https://gitea.example.com/team/repo"
+        );
+    }
+
+    #[test]
+    fn remote_url_ssh_with_port_is_dropped() {
+        // Web URLs don't use the SSH port; strip the :port segment.
+        assert_eq!(
+            normalize_remote_url("ssh://git@github.com:22/org/repo.git"),
+            "https://github.com/org/repo"
+        );
+        assert_eq!(
+            normalize_remote_url("ssh://host:2222/team/repo.git"),
+            "https://host/team/repo"
         );
     }
 
