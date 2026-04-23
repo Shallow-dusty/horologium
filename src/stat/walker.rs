@@ -6,9 +6,12 @@ use std::path::{Path, PathBuf};
 /// Returns an empty vec if `root` doesn't exist or isn't readable —
 /// callers treat "no projects yet" as a valid empty corpus.
 ///
-/// Symlinks are followed (via `FileType::is_dir` / `is_file` default
-/// behavior). Non-file, non-dir entries (sockets, device nodes) are
-/// silently skipped.
+/// Symlinks are **not** followed: `DirEntry::file_type()` returns the
+/// un-dereferenced type, so a symlink to a directory reports as neither
+/// dir nor file and is silently skipped (along with sockets, device
+/// nodes, and other special entries). Claude Code's projects root doesn't
+/// use symlinks in practice; callers who want symlinked session trees
+/// can `--root` directly at the target.
 pub fn find_jsonl(root: &Path) -> Vec<PathBuf> {
     let mut result = Vec::new();
     let mut stack = vec![root.to_path_buf()];
