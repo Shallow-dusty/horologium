@@ -115,6 +115,15 @@ pub fn format_table(report: &Report) -> String {
         out.push('\n');
         out.push_str(&format!("note: {} malformed line(s) skipped\n", report.malformed_lines));
     }
+    if report.divergent_duplicates > 0 {
+        if report.malformed_lines == 0 {
+            out.push('\n');
+        }
+        out.push_str(&format!(
+            "note: {} duplicate message.id(s) carried divergent payloads — kept first-seen (log may be corrupted)\n",
+            report.divergent_duplicates,
+        ));
+    }
     if !report.unknown_models.is_empty() {
         out.push('\n');
         out.push_str("note: records with unpriced models (tokens counted, cost excluded):\n");
@@ -207,6 +216,7 @@ mod tests {
             rows,
             malformed_lines: 0,
             unknown_models: BTreeMap::new(),
+            divergent_duplicates: 0,
         }
     }
 
@@ -235,6 +245,14 @@ mod tests {
         let s = format_table(&r);
         assert!(s.contains("3 malformed line(s)"));
         assert!(s.contains("claude-mystery-99 × 2"));
+    }
+
+    #[test]
+    fn table_notes_divergent_duplicates() {
+        let mut r = sample_report();
+        r.divergent_duplicates = 2;
+        let s = format_table(&r);
+        assert!(s.contains("2 duplicate message.id(s) carried divergent payloads"));
     }
 
     #[test]

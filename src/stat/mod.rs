@@ -104,6 +104,12 @@ fn emit_diagnostics_to_stderr(report: &aggregate::Report) {
     if report.malformed_lines > 0 {
         eprintln!("note: {} malformed line(s) skipped", report.malformed_lines);
     }
+    if report.divergent_duplicates > 0 {
+        eprintln!(
+            "note: {} duplicate message.id(s) carried divergent payloads — kept first-seen (log may be corrupted)",
+            report.divergent_duplicates,
+        );
+    }
     if !report.unknown_models.is_empty() {
         eprintln!("note: records with unpriced models (tokens counted, cost excluded):");
         for (model, count) in report.unknown_models.iter().take(5) {

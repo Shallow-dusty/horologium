@@ -3,8 +3,7 @@
 //! Each rayon worker opens one JSONL file, parses each line, filters and
 //! prices the surviving records, and stores one `PerIdSummary` per
 //! `message.id` into a local map. The reduce phase unions the per-id maps
-//! (first-writer wins on collision — the summaries are identical for the
-//! same id so choice doesn't matter), and only then do we fold into the
+//! (first-writer wins on collision), and only then do we fold into the
 //! final `BTreeMap<date, Totals>`.
 //!
 //! Why two-phase instead of per-file-bucketed: dedup across files matters
@@ -13,6 +12,15 @@
 //! duplicated by backup tooling — naive per-file aggregation would double
 //! count). Since per-id dedup happens before bucketing, the unknown-model
 //! warning counts stay consistent with the row counts.
+//!
+//! Divergent duplicates: byte-identical duplicates are the expected shape,
+//! but a corrupted/merged corpus could produce two records sharing an id
+//! with different payloads. rayon's reduce ordering isn't deterministic,
+//! so which writer wins would silently depend on thread scheduling. We
+//! instead compare on every collision and count divergences in
+//! `Report::divergent_duplicates`; the first-seen summary still wins (so
+//! aggregates remain stable within a run), and the counter surfaces the
+//! anomaly via stderr.
 
 use super::pricing::{cost_for_record, is_silent_unknown, lookup};
 use super::record::{parse_line, Record};
@@ -67,9 +75,15 @@ pub struct Report {
     /// Model-id → count of unique records using that model. Token counts
     /// are still included in `rows`; only cost contribution is zero.
     pub unknown_models: BTreeMap<String, u64>,
+    /// Count of dedup collisions where a second occurrence of the same
+    /// `message.id` carried a payload that disagreed with the first
+    /// occurrence (different date / model / tokens). The first-seen copy
+    /// is kept in the totals; this counter exposes the anomaly so the
+    /// user can investigate the underlying log corruption.
+    pub divergent_duplicates: u64,
 }
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, PartialEq, Debug)]
 enum PriceState {
     /// Model matched in the embedded pricing snapshot.
     Priced,
@@ -84,7 +98,7 @@ enum PriceState {
 /// A single-record contribution keyed by `message.id`. Kept whole through
 /// the reduce phase so dedup is authoritative before bucket aggregation
 /// and warning counts line up with row counts.
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Debug)]
 struct PerIdSummary {
     date: NaiveDate,
     totals: Totals, // records=1 when filled from a live Record
@@ -96,6 +110,7 @@ struct PerIdSummary {
 struct LocalAccumulator {
     per_id: HashMap<String, PerIdSummary>,
     malformed: u64,
+    divergent_duplicates: u64,
 }
 
 impl LocalAccumulator {
@@ -117,11 +132,6 @@ impl LocalAccumulator {
             }
         }
 
-        use std::collections::hash_map::Entry;
-        let Entry::Vacant(slot) = self.per_id.entry(record.message_id.clone()) else {
-            return; // duplicate — keep first occurrence
-        };
-
         let (cost, price_state) = match lookup(&record.model) {
             Some(row) => (cost_for_record(&record, row), PriceState::Priced),
             None if is_silent_unknown(&record.model) => (0.0, PriceState::SilentUnknown),
@@ -136,12 +146,27 @@ impl LocalAccumulator {
             cost_usd: cost,
             records: 1,
         };
-        slot.insert(PerIdSummary {
+        let new_summary = PerIdSummary {
             date: local_date,
             totals,
             model_id: record.model,
             price_state,
-        });
+        };
+
+        use std::collections::hash_map::Entry;
+        match self.per_id.entry(record.message_id.clone()) {
+            Entry::Vacant(slot) => {
+                slot.insert(new_summary);
+            }
+            Entry::Occupied(existing) => {
+                if *existing.get() != new_summary {
+                    self.divergent_duplicates += 1;
+                }
+                // Byte-identical duplicates are silently dropped.
+                // Divergent duplicates: keep first-seen (stable within a
+                // run), surface the anomaly via the counter.
+            }
+        }
     }
 
     fn consume_file(&mut self, path: &Path, filters: &Filters) {
@@ -169,11 +194,20 @@ impl LocalAccumulator {
     fn merge(mut self, other: Self) -> Self {
         self.per_id.reserve(other.per_id.len());
         for (id, summary) in other.per_id {
-            // First-writer wins; summaries for the same id are identical
-            // so the choice is semantic-neutral.
-            self.per_id.entry(id).or_insert(summary);
+            use std::collections::hash_map::Entry;
+            match self.per_id.entry(id) {
+                Entry::Vacant(slot) => {
+                    slot.insert(summary);
+                }
+                Entry::Occupied(existing) => {
+                    if *existing.get() != summary {
+                        self.divergent_duplicates += 1;
+                    }
+                }
+            }
         }
         self.malformed += other.malformed;
+        self.divergent_duplicates += other.divergent_duplicates;
         self
     }
 
@@ -190,6 +224,7 @@ impl LocalAccumulator {
             rows,
             malformed_lines: self.malformed,
             unknown_models,
+            divergent_duplicates: self.divergent_duplicates,
         }
     }
 }
@@ -381,5 +416,59 @@ mod tests {
         assert!(r.rows.is_empty());
         assert_eq!(r.malformed_lines, 0);
         assert!(r.unknown_models.is_empty());
+        assert_eq!(r.divergent_duplicates, 0);
+    }
+
+    #[test]
+    fn byte_identical_duplicates_do_not_flag_divergence() {
+        // Two files with the exact same record — the common backup/rsync
+        // case. Must stay at records=1 with zero divergence flags.
+        let tmp = tempfile::tempdir().unwrap();
+        let a = write_jsonl(tmp.path(), "a.jsonl", &[
+            &assistant("dup", "claude-opus-4-7", "2026-04-05T12:00:00Z", "/p", 100, 50),
+        ]);
+        let b = write_jsonl(tmp.path(), "b.jsonl", &[
+            &assistant("dup", "claude-opus-4-7", "2026-04-05T12:00:00Z", "/p", 100, 50),
+        ]);
+        let r = aggregate_daily(&[a, b], &Filters::default());
+        let d = NaiveDate::from_ymd_opt(2026, 4, 5).unwrap();
+        assert_eq!(r.rows[&d].records, 1);
+        assert_eq!(r.divergent_duplicates, 0);
+    }
+
+    #[test]
+    fn divergent_duplicates_are_counted_but_first_seen_wins_within_file() {
+        // Two records in the same file share an id but disagree on
+        // tokens — simulates a corrupted session log. The counter must
+        // fire and the first record must win in totals.
+        let tmp = tempfile::tempdir().unwrap();
+        let path = write_jsonl(tmp.path(), "s.jsonl", &[
+            &assistant("x", "claude-opus-4-7", "2026-04-05T12:00:00Z", "/p", 100, 50),
+            &assistant("x", "claude-opus-4-7", "2026-04-05T12:00:00Z", "/p", 999, 999),
+        ]);
+        let r = aggregate_daily(&[path], &Filters::default());
+        let d = NaiveDate::from_ymd_opt(2026, 4, 5).unwrap();
+        assert_eq!(r.rows[&d].records, 1);
+        assert_eq!(r.rows[&d].input_tokens, 100, "first-seen should win");
+        assert_eq!(r.divergent_duplicates, 1);
+    }
+
+    #[test]
+    fn divergent_duplicates_across_files_are_counted() {
+        // Same id in two files but with different token counts. Even
+        // though rayon reduce ordering is non-deterministic, the
+        // divergence counter is deterministic because it fires on every
+        // collision regardless of which side wins.
+        let tmp = tempfile::tempdir().unwrap();
+        let a = write_jsonl(tmp.path(), "a.jsonl", &[
+            &assistant("x", "claude-opus-4-7", "2026-04-05T12:00:00Z", "/p", 100, 50),
+        ]);
+        let b = write_jsonl(tmp.path(), "b.jsonl", &[
+            &assistant("x", "claude-opus-4-7", "2026-04-05T12:00:00Z", "/p", 200, 50),
+        ]);
+        let r = aggregate_daily(&[a, b], &Filters::default());
+        let d = NaiveDate::from_ymd_opt(2026, 4, 5).unwrap();
+        assert_eq!(r.rows[&d].records, 1);
+        assert_eq!(r.divergent_duplicates, 1);
     }
 }
