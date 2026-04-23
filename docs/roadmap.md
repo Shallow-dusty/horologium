@@ -117,3 +117,4 @@
 | 2026-04-23 | cache 1h write 价格 = 2× 5m（Anthropic 公开规则），表里硬编码；单测扫全表验证 2× 不变式 | LiteLLM 只给 5m 价；2× 规则是公开但未推送到 LiteLLM JSON；硬编码 + 不变式测试能让将来 Anthropic 调规则时立刻报错 |
 | 2026-04-23 | 跨文件 message-id dedup：fold 里保 `HashMap<id, PerIdSummary>`，reduce 后才 bucket 到 `BTreeMap<date, Totals>` | Claude Code 不应该跨 jsonl 重复 id，但备份 / rsync 可能复制文件；二阶段 dedup 顺带让 `unknown_models` 计数与 records 数永远一致 |
 | 2026-04-23 | Phase 2 `stat daily` MVP 发布，`session` / `blocks` 延后到 v2.x | `daily` 覆盖 Max 用户 90% 需求；`session` / `blocks` 是 ccusage 细分维度，Max 用户无刚需，不值得阻塞发版 |
+| 2026-04-23 | v2.0.1 = codex gpt-5.5 / gpt-5 双审后的 5 项修复（F4 walker 注释 / F2 JSON 诊断走 stderr / F1 divergent-dup 检测 / F5 空 project 归一化 / S2 model-id 前缀归一化） | 83→90 tests；F3 浮点求和顺序（无用户反馈）和 S5 malformed 细分（观察粒度非 correctness）延后 |
