@@ -79,6 +79,20 @@ pub fn lookup(model_id: &str) -> Option<&'static PricingRow> {
     table().get(model_id)
 }
 
+/// Model IDs that Claude Code emits as billable-shaped `assistant` rows
+/// but that aren't real billable models. Entries here get counted into
+/// token totals but suppressed from the "unknown model" warning — they
+/// are not surprises worth nagging about.
+const SILENT_UNKNOWN_MODELS: &[&str] = &[
+    // Claude Code's sentinel for tool-use / synthetic assistant rows.
+    "<synthetic>",
+];
+
+/// True when `model_id` is a known non-billable sentinel (no cost, no warning).
+pub fn is_silent_unknown(model_id: &str) -> bool {
+    SILENT_UNKNOWN_MODELS.contains(&model_id)
+}
+
 /// Compute USD cost for one record given its matched pricing row. All
 /// five token classes are billed independently.
 pub fn cost_for_record(r: &Record, row: &PricingRow) -> f64 {
@@ -149,6 +163,14 @@ mod tests {
         assert!(lookup("claude-opus-4-99-imaginary").is_none());
         assert!(lookup("gpt-4").is_none());
         assert!(lookup("").is_none());
+    }
+
+    #[test]
+    fn silent_unknown_matches_synthetic_only() {
+        assert!(is_silent_unknown("<synthetic>"));
+        assert!(!is_silent_unknown("claude-opus-4-7"));
+        assert!(!is_silent_unknown("claude-mystery-99"));
+        assert!(!is_silent_unknown(""));
     }
 
     #[test]

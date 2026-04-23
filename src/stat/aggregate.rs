@@ -14,7 +14,7 @@
 //! count). Since per-id dedup happens before bucketing, the unknown-model
 //! warning counts stay consistent with the row counts.
 
-use super::pricing::{cost_for_record, lookup};
+use super::pricing::{cost_for_record, is_silent_unknown, lookup};
 use super::record::{parse_line, Record};
 use chrono::{Local, NaiveDate};
 use rayon::prelude::*;
@@ -69,6 +69,18 @@ pub struct Report {
     pub unknown_models: BTreeMap<String, u64>,
 }
 
+#[derive(Clone, Copy, PartialEq)]
+enum PriceState {
+    /// Model matched in the embedded pricing snapshot.
+    Priced,
+    /// Model absent from the snapshot and not on the silent-unknown list —
+    /// surfaced in `Report::unknown_models` so the user can investigate.
+    UnknownBillable,
+    /// Model absent from the snapshot but on the silent-unknown list
+    /// (e.g. `<synthetic>` sentinels). Tokens counted, cost 0, no warning.
+    SilentUnknown,
+}
+
 /// A single-record contribution keyed by `message.id`. Kept whole through
 /// the reduce phase so dedup is authoritative before bucket aggregation
 /// and warning counts line up with row counts.
@@ -77,7 +89,7 @@ struct PerIdSummary {
     date: NaiveDate,
     totals: Totals, // records=1 when filled from a live Record
     model_id: String,
-    priced: bool, // false ⇒ model wasn't in the pricing snapshot
+    price_state: PriceState,
 }
 
 #[derive(Default)]
@@ -110,9 +122,10 @@ impl LocalAccumulator {
             return; // duplicate — keep first occurrence
         };
 
-        let (cost, priced) = match lookup(&record.model) {
-            Some(row) => (cost_for_record(&record, row), true),
-            None => (0.0, false),
+        let (cost, price_state) = match lookup(&record.model) {
+            Some(row) => (cost_for_record(&record, row), PriceState::Priced),
+            None if is_silent_unknown(&record.model) => (0.0, PriceState::SilentUnknown),
+            None => (0.0, PriceState::UnknownBillable),
         };
         let totals = Totals {
             input_tokens: record.input_tokens,
@@ -127,7 +140,7 @@ impl LocalAccumulator {
             date: local_date,
             totals,
             model_id: record.model,
-            priced,
+            price_state,
         });
     }
 
@@ -169,7 +182,7 @@ impl LocalAccumulator {
         let mut unknown_models: BTreeMap<String, u64> = BTreeMap::new();
         for (_, s) in self.per_id {
             rows.entry(s.date).or_default().merge(&s.totals);
-            if !s.priced {
+            if s.price_state == PriceState::UnknownBillable {
                 *unknown_models.entry(s.model_id).or_insert(0) += 1;
             }
         }
@@ -292,6 +305,27 @@ mod tests {
             &assistant("dup", "claude-mystery-99", "2026-04-05T12:00:00Z", "/p", 100, 100),
         ]);
         let r = aggregate_daily(&[a, b], &Filters::default());
+        assert_eq!(r.unknown_models.get("claude-mystery-99"), Some(&1));
+    }
+
+    #[test]
+    fn synthetic_sentinel_is_silent() {
+        // <synthetic> appears in real Claude Code logs on tool-use rows.
+        // Tokens should be counted, cost 0, but it must NOT appear in
+        // unknown_models (that's noise to the user).
+        let tmp = tempfile::tempdir().unwrap();
+        let path = write_jsonl(tmp.path(), "s.jsonl", &[
+            &assistant("m1", "<synthetic>", "2026-04-05T12:00:00Z", "/p", 500, 100),
+            &assistant("m2", "claude-mystery-99", "2026-04-05T12:00:00Z", "/p", 300, 50),
+        ]);
+        let r = aggregate_daily(&[path], &Filters::default());
+        let d = NaiveDate::from_ymd_opt(2026, 4, 5).unwrap();
+        // Tokens from both records are counted.
+        assert_eq!(r.rows[&d].input_tokens, 800);
+        assert_eq!(r.rows[&d].records, 2);
+        // <synthetic> is silent; mystery-99 warns.
+        assert!(!r.unknown_models.contains_key("<synthetic>"),
+            "got: {:?}", r.unknown_models);
         assert_eq!(r.unknown_models.get("claude-mystery-99"), Some(&1));
     }
 

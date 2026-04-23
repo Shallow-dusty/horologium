@@ -67,6 +67,22 @@ fn daily(args: DailyArgs) -> Result<()> {
     let root = resolve_root(args.root.clone())?;
     let filters = build_filters(&args)?;
     let paths = walker::find_jsonl(&root);
+
+    // Surface obvious misconfiguration to stderr without blocking output.
+    // Common pitfalls we want visible: pointing `--root` at a wrong path,
+    // or running before Claude Code has written any session.
+    if !root.exists() {
+        eprintln!(
+            "warning: root `{}` does not exist — report will be empty",
+            root.display(),
+        );
+    } else if paths.is_empty() {
+        eprintln!(
+            "hint: no .jsonl files found under `{}` — is `--root` correct?",
+            root.display(),
+        );
+    }
+
     let report = aggregate::aggregate_daily(&paths, &filters);
     let out = if args.json {
         format::format_ndjson(&report)
