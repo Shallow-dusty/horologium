@@ -2,7 +2,7 @@
 name = "horologium"
 version = "2.0.1"
 edition = "2021"
-rust-version = "1.77"
+rust-version = "1.85"
 description = "Unified Claude Code status line and usage analytics in a single fast binary"
 license = "MIT"
 repository = "https://github.com/Shallow-dusty/horologium"
