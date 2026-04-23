@@ -16,7 +16,16 @@ tests/parity/
 
 Each fixture is rendered in 5 modes: `default`, `powerline`, `multiline`,
 `hyperlinks`, `all` (= powerline + multiline + hyperlinks). That yields
-one `.snap` file per mode per fixture (7 × 5 = 35 cases today).
+one `.snap` file per mode per fixture (10 × 5 = 50 cases today).
+
+## Fixture placeholder
+
+Fixtures may contain the literal string `__STUB_GIT_REPO__` in
+`workspace.current_dir`. The harness rewrites it to an absolute path
+under `tests/parity/runtime-gitrepo/` (a minimal `.git/HEAD`-only stub
+repo, gitignored, generated on demand). This is how the `08-git-branch`
+fixture exercises the branch-rendering path deterministically without
+depending on whichever repo the script is invoked from.
 
 ## Usage
 
@@ -35,6 +44,9 @@ Env vars:
 - `HOROLOGIUM` — override the binary path (default: `horologium` on PATH)
 - `BASH_STATUSLINE` — path to the legacy `statusline.sh` backup
   (default: `~/.backups/claude/statusline.sh.bash-v1.20260423.bak`)
+
+Requires: `bash` ≥ 4 (arrays, `[[ ]]`, process substitution), `diff`,
+`sed`. No Rust toolchain needed at check time — just a built binary.
 
 ## Why no countdown in fixtures
 
