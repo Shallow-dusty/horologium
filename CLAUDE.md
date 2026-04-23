@@ -48,6 +48,6 @@ docs/
 
 ## 未完事项备忘
 
-- 还未建 GitHub 远程仓库（已 `git init`）
+- 远程仓库 `git@github.com:Shallow-dusty/horologium.git` 已建；本地 v1.0.0 tag 与 Phase 1 收尾的 commits 尚未 push（默认不自动 push，需用户指令）
 - 启用 Phase 1 v1.0 后，实际使用 ≥ 2 周以验证"替代 statusline.sh 无退化"出口条件
 - Phase 2 `stat`、Phase 3 `configure` 未启动
