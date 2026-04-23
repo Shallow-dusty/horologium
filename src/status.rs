@@ -24,6 +24,11 @@ pub struct StatusArgs {
     /// usage (context %/cost/rate limits) below. Works alongside --powerline.
     #[arg(long)]
     multiline: bool,
+    /// Emit OSC 8 hyperlink escapes so the directory and branch segments
+    /// are clickable (file://... for cwd, git origin web URL for branch).
+    /// Off by default because old terminals render the escape bytes literally.
+    #[arg(long)]
+    hyperlinks: bool,
 }
 
 #[derive(Deserialize, Default)]
@@ -89,6 +94,9 @@ struct Segment {
     /// Row index for multiline mode. 0 = identity row (model/dir/branch),
     /// 1 = usage row (ctx%/cost/rate). Ignored when --multiline is off.
     row: u8,
+    /// Optional URL for OSC 8 hyperlink wrapping. Ignored unless
+    /// --hyperlinks is passed.
+    link: Option<String>,
 }
 
 // Fixed color pairs for powerline segments (xterm-256 indices).
@@ -115,29 +123,41 @@ pub fn run(args: StatusArgs) -> Result<()> {
 
     let segments = build_segments(&data);
 
-    let renderer = if args.powerline {
-        render_powerline
-    } else {
-        render_plain
+    let opts = RenderOpts {
+        powerline: args.powerline,
+        hyperlinks: args.hyperlinks,
     };
     let output = if args.multiline {
-        render_multiline(&segments, renderer)
+        render_multiline(&segments, &opts)
     } else {
-        renderer(&segments)
+        render_row(&segments, &opts)
     };
     println!("{}", output);
     Ok(())
 }
 
-/// Split segments by `row`, render each group with the given renderer,
-/// then join with newlines. Empty groups are dropped so a missing row
-/// doesn't leave a blank line.
-fn render_multiline(segs: &[Segment], renderer: fn(&[Segment]) -> String) -> String {
+struct RenderOpts {
+    powerline: bool,
+    hyperlinks: bool,
+}
+
+fn render_row(segs: &[Segment], opts: &RenderOpts) -> String {
+    if opts.powerline {
+        render_powerline(segs, opts.hyperlinks)
+    } else {
+        render_plain(segs, opts.hyperlinks)
+    }
+}
+
+/// Split segments by `row`, render each group per RenderOpts, then join with
+/// newlines. Empty groups are dropped so a missing row doesn't leave a blank
+/// line.
+fn render_multiline(segs: &[Segment], opts: &RenderOpts) -> String {
     let rows = max_row(segs) + 1;
     (0..rows)
         .map(|r| segs.iter().filter(|s| s.row == r).cloned().collect::<Vec<_>>())
         .filter(|group| !group.is_empty())
-        .map(|group| renderer(&group))
+        .map(|group| render_row(&group, opts))
         .collect::<Vec<_>>()
         .join("\n")
 }
@@ -164,22 +184,25 @@ fn build_segments(data: &Input) -> Vec<Segment> {
         ));
     }
     if let Some(dir) = data.workspace.current_dir.as_deref() {
-        segs.push(Segment::fixed(
-            basename(dir).to_string(),
-            PL_DIR_BG,
-            PL_DIR_FG,
-            ROW_IDENTITY,
-        ));
+        let dir_link = Some(format!("file://{}", dir));
+        segs.push(
+            Segment::fixed(
+                basename(dir).to_string(),
+                PL_DIR_BG,
+                PL_DIR_FG,
+                ROW_IDENTITY,
+            )
+            .with_link(dir_link),
+        );
         // Mirror bash `git branch --show-current 2>/dev/null`: emit branch
         // only when attached to a local branch; detached HEAD / non-git dir
         // yields nothing.
         if let Some(branch) = crate::git::current_branch(Path::new(dir)) {
-            segs.push(Segment::fixed(
-                branch,
-                PL_BRANCH_BG,
-                PL_BRANCH_FG,
-                ROW_IDENTITY,
-            ));
+            let branch_link = crate::git::origin_web_url(Path::new(dir));
+            segs.push(
+                Segment::fixed(branch, PL_BRANCH_BG, PL_BRANCH_FG, ROW_IDENTITY)
+                    .with_link(branch_link),
+            );
         }
     }
 
@@ -233,6 +256,7 @@ impl Segment {
             pl_bg,
             pl_fg,
             row,
+            link: None,
         }
     }
 
@@ -246,7 +270,14 @@ impl Segment {
             pl_bg,
             pl_fg,
             row,
+            link: None,
         }
+    }
+
+    /// Builder-style attachment of an OSC 8 URL.
+    fn with_link(mut self, url: Option<String>) -> Self {
+        self.link = url;
+        self
     }
 }
 
@@ -287,14 +318,14 @@ fn powerline_rate_colors(pct: i64) -> (u8, u8) {
     }
 }
 
-fn render_plain(segs: &[Segment]) -> String {
+fn render_plain(segs: &[Segment], hyperlinks: bool) -> String {
     segs.iter()
-        .map(|s| s.plain.as_str())
+        .map(|s| wrap_link(&s.plain, s.link.as_deref(), hyperlinks))
         .collect::<Vec<_>>()
         .join("  ")
 }
 
-fn render_powerline(segs: &[Segment]) -> String {
+fn render_powerline(segs: &[Segment], hyperlinks: bool) -> String {
     let mut out = String::new();
     for (i, s) in segs.iter().enumerate() {
         if i > 0 {
@@ -305,16 +336,28 @@ fn render_powerline(segs: &[Segment]) -> String {
                 prev_bg, s.pl_bg, ARROW
             ));
         }
-        out.push_str(&format!(
+        // Body (optionally wrapped in OSC 8) inherits the segment's bg so the
+        // hyperlink underline appears inside the colored block.
+        let body = format!(
             "\x1b[38;5;{};48;5;{}m {} ",
             s.pl_fg, s.pl_bg, s.text
-        ));
+        );
+        out.push_str(&wrap_link(&body, s.link.as_deref(), hyperlinks));
     }
     if let Some(last) = segs.last() {
         // Trailing arrow back to terminal default: reset bg, fg = last bg.
         out.push_str(&format!("\x1b[0;38;5;{}m{}\x1b[0m", last.pl_bg, ARROW));
     }
     out
+}
+
+/// Wrap `body` in an OSC 8 hyperlink envelope when enabled and url is set.
+/// Uses `ESC \` (ST) as the terminator — the modern-standard form.
+fn wrap_link(body: &str, url: Option<&str>, hyperlinks: bool) -> String {
+    match (hyperlinks, url) {
+        (true, Some(u)) => format!("\x1b]8;;{}\x1b\\{}\x1b]8;;\x1b\\", u, body),
+        _ => body.to_string(),
+    }
 }
 
 fn fmt_countdown(secs: i64) -> String {
@@ -432,7 +475,7 @@ mod tests {
             Segment::fixed("b".into(), 0, 0, 0),
             Segment::fixed("c".into(), 0, 0, 0),
         ];
-        assert_eq!(render_plain(&segs), "a  b  c");
+        assert_eq!(render_plain(&segs, false), "a  b  c");
     }
 
     #[test]
@@ -441,7 +484,7 @@ mod tests {
             Segment::fixed("A".into(), 24, 15, 0),
             Segment::fixed("B".into(), 31, 15, 0),
         ];
-        let out = render_powerline(&segs);
+        let out = render_powerline(&segs, false);
         // Two bodies + transition arrow + trailing arrow.
         assert!(out.contains(" A "));
         assert!(out.contains(" B "));
@@ -454,7 +497,7 @@ mod tests {
 
     #[test]
     fn render_powerline_empty_segments_is_empty() {
-        assert_eq!(render_powerline(&[]), "");
+        assert_eq!(render_powerline(&[], false), "");
     }
 
     #[test]
@@ -465,7 +508,11 @@ mod tests {
             Segment::fixed("42%".into(), 0, 0, 1),
             Segment::fixed("$0.10".into(), 0, 0, 1),
         ];
-        let out = render_multiline(&segs, render_plain);
+        let opts = RenderOpts {
+            powerline: false,
+            hyperlinks: false,
+        };
+        let out = render_multiline(&segs, &opts);
         let lines: Vec<&str> = out.split('\n').collect();
         assert_eq!(lines.len(), 2, "expected 2 rows, got {:?}", lines);
         assert_eq!(lines[0], "m  d");
@@ -476,8 +523,44 @@ mod tests {
     fn render_multiline_drops_empty_rows() {
         // Only row 0 populated: output should be a single line, not "m\n".
         let segs = vec![Segment::fixed("m".into(), 0, 0, 0)];
-        let out = render_multiline(&segs, render_plain);
+        let opts = RenderOpts {
+            powerline: false,
+            hyperlinks: false,
+        };
+        let out = render_multiline(&segs, &opts);
         assert_eq!(out, "m");
         assert!(!out.contains('\n'));
+    }
+
+    #[test]
+    fn wrap_link_disabled_is_passthrough() {
+        // --hyperlinks off: no OSC 8 envelope even when URL is set.
+        assert_eq!(
+            wrap_link("body", Some("https://example.com"), false),
+            "body"
+        );
+    }
+
+    #[test]
+    fn wrap_link_without_url_is_passthrough() {
+        // Segment has no URL: no envelope even when --hyperlinks is on.
+        assert_eq!(wrap_link("body", None, true), "body");
+    }
+
+    #[test]
+    fn wrap_link_emits_osc8_envelope() {
+        let out = wrap_link("body", Some("https://example.com"), true);
+        assert!(out.starts_with("\x1b]8;;https://example.com\x1b\\"));
+        assert!(out.ends_with("\x1b]8;;\x1b\\"));
+        assert!(out.contains("body"));
+    }
+
+    #[test]
+    fn render_plain_with_hyperlinks_wraps_segment_with_link() {
+        let seg = Segment::fixed("01.Horologium".into(), 0, 0, 0)
+            .with_link(Some("file:///home/shallow/08.Rust-Inscription/01.Horologium".into()));
+        let out = render_plain(&[seg], true);
+        assert!(out.contains("\x1b]8;;file:///home/shallow"));
+        assert!(out.contains("01.Horologium"));
     }
 }

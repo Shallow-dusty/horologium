@@ -49,6 +49,54 @@ fn parse_head(content: &str) -> Option<String> {
         .map(str::to_string)
 }
 
+/// Read `.git/config` and return the `origin` remote URL normalized to an
+/// HTTPS web URL. Returns None if there is no origin or the URL can't be
+/// understood. Used for OSC 8 hyperlinks on the branch segment.
+pub fn origin_web_url(cwd: &Path) -> Option<String> {
+    let git_dir = find_git_dir(cwd)?;
+    let config = std::fs::read_to_string(git_dir.join("config")).ok()?;
+    parse_origin_url(&config).map(|u| normalize_remote_url(&u))
+}
+
+fn parse_origin_url(config: &str) -> Option<String> {
+    // Minimal git-config parser: scan for `[remote "origin"]` section and
+    // return the first `url = ...` value within it. Good enough for the
+    // 99% case of origin pointing at a single URL.
+    let mut in_origin = false;
+    for line in config.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with('[') {
+            in_origin = trimmed == "[remote \"origin\"]";
+            continue;
+        }
+        if in_origin {
+            if let Some(rest) = trimmed.strip_prefix("url") {
+                let val = rest.trim_start_matches(|c: char| c.is_whitespace() || c == '=');
+                if !val.is_empty() {
+                    return Some(val.to_string());
+                }
+            }
+        }
+    }
+    None
+}
+
+fn normalize_remote_url(url: &str) -> String {
+    let stripped = url.trim_end_matches(".git");
+    // `git@host:path` (SCP-like) -> `https://host/path`
+    if let Some(rest) = stripped.strip_prefix("git@") {
+        if let Some((host, path)) = rest.split_once(':') {
+            return format!("https://{}/{}", host, path);
+        }
+    }
+    // `ssh://git@host/path` -> `https://host/path`
+    if let Some(rest) = stripped.strip_prefix("ssh://git@") {
+        return format!("https://{}", rest);
+    }
+    // Already HTTPS (possibly with `.git` suffix, already trimmed).
+    stripped.to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -84,5 +132,58 @@ mod tests {
     fn head_empty_returns_none() {
         assert_eq!(parse_head(""), None);
         assert_eq!(parse_head("\n"), None);
+    }
+
+    #[test]
+    fn remote_url_normalizes_scp_form() {
+        assert_eq!(
+            normalize_remote_url("git@github.com:shallow/horologium.git"),
+            "https://github.com/shallow/horologium"
+        );
+    }
+
+    #[test]
+    fn remote_url_normalizes_ssh_form() {
+        assert_eq!(
+            normalize_remote_url("ssh://git@github.com/shallow/horologium.git"),
+            "https://github.com/shallow/horologium"
+        );
+    }
+
+    #[test]
+    fn remote_url_passes_through_https() {
+        assert_eq!(
+            normalize_remote_url("https://github.com/shallow/horologium.git"),
+            "https://github.com/shallow/horologium"
+        );
+        assert_eq!(
+            normalize_remote_url("https://github.com/shallow/horologium"),
+            "https://github.com/shallow/horologium"
+        );
+    }
+
+    #[test]
+    fn origin_config_parse_picks_origin() {
+        let config = r#"
+[core]
+	repositoryformatversion = 0
+[remote "upstream"]
+	url = https://github.com/other/repo.git
+[remote "origin"]
+	url = git@github.com:shallow/horologium.git
+	fetch = +refs/heads/*:refs/remotes/origin/*
+[branch "main"]
+	remote = origin
+"#;
+        assert_eq!(
+            parse_origin_url(config).as_deref(),
+            Some("git@github.com:shallow/horologium.git")
+        );
+    }
+
+    #[test]
+    fn origin_config_parse_no_origin() {
+        let config = "[core]\n\trepositoryformatversion = 0\n";
+        assert_eq!(parse_origin_url(config), None);
     }
 }
