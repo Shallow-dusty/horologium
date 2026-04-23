@@ -21,6 +21,8 @@
 
 **出口条件**：日常用 Horologium 的 `status` 替代当前 bash 脚本 ≥ 2 周无退化。
 
+2026-04-23：切换启动。`~/.claude/settings.json` statusLine.command 已改为 `horologium status`；bash 原版备份至 `~/.backups/claude/statusline.sh.bash-v1.20260423.bak`。实测冷启动 25 ms → 512 µs（~49×）。2 周观测期始于本日。
+
 ## 版本号策略
 
 - **`vX.0`**：新 Phase 完成（如 v1.0 = Phase 1 完成，v2.0 = Phase 2 完成）
@@ -101,3 +103,5 @@
 | 2026-04-23 | worktree config 查询走 `commondir` 指针解析；factor 出纯函数便于单测 | linked worktree 的 per-wt gitdir 不含 config；纯函数 `resolve_common_dir_from_content` 让单测不需要真实 worktree 布局 |
 | 2026-04-23 | `tempfile` 加入 `[dev-dependencies]` 以便写 IO 测试；release 依赖不变 | v1.0 的 git.rs 测试全是字符串层级，IO pipeline 无证据；dev-dep 不影响冷启动 |
 | 2026-04-23 | `--hyperlinks` 关闭时短路 `origin_web_url()` 与 `file://` URL 合成 | 冷启动热路径不必要的 IO（读 `.git/config`）在默认模式下是纯浪费 |
+| 2026-04-23 | 切换 `~/.claude/statusline.sh` → `horologium status` 启动 2 周 dogfooding | Phase 1 出口条件；bash 原版备份到 `~/.backups/claude/` 便于回滚 |
+| 2026-04-23 | 新增 `tests/parity/` snapshot harness（7 fixtures × 5 modes = 35 cases）作为 NIT C 落地 | 未来 refactor 的安全网；`--vs-bash` 同时发现 bash 两处 bug（`xargs basename` 拆空格；`git branch --show-current` 读进程 cwd 而非 JSON 的 workspace.current_dir）—— horologium 均已正确处理，记入 `known-diffs.md` |
