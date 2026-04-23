@@ -73,10 +73,28 @@ fn table() -> &'static HashMap<String, PricingRow> {
     TABLE.get_or_init(load_table)
 }
 
-/// Look up pricing by exact `model_id`. Returns `None` for unknown models;
+/// Look up pricing by `model_id`. Returns `None` for unknown models;
 /// callers should still count tokens but skip cost computation in that case.
+///
+/// Input is normalized before lookup: upstream LiteLLM also ships
+/// `anthropic/claude-*` and `openrouter/anthropic/claude-*` aliases that
+/// point at the same prices, and Claude Code could in principle emit a
+/// prefixed id. Strip these known prefixes so a prefixed model still
+/// prices correctly instead of silently falling into `unknown_models`.
 pub fn lookup(model_id: &str) -> Option<&'static PricingRow> {
-    table().get(model_id)
+    let normalized = normalize_model_id(model_id);
+    table().get(normalized)
+}
+
+fn normalize_model_id(model_id: &str) -> &str {
+    // Longest prefix first so the generic `anthropic/` branch doesn't
+    // swallow the `openrouter/anthropic/` form.
+    for prefix in ["openrouter/anthropic/", "anthropic/"] {
+        if let Some(stripped) = model_id.strip_prefix(prefix) {
+            return stripped;
+        }
+    }
+    model_id
 }
 
 /// Model IDs that Claude Code emits as billable-shaped `assistant` rows
@@ -163,6 +181,35 @@ mod tests {
         assert!(lookup("claude-opus-4-99-imaginary").is_none());
         assert!(lookup("gpt-4").is_none());
         assert!(lookup("").is_none());
+    }
+
+    #[test]
+    fn prefixed_model_ids_are_normalized() {
+        // LiteLLM lists aliases for each bare `claude-*` row; make sure
+        // prefixed ids price identically instead of sliding into the
+        // unknown_models warning bucket.
+        let bare = lookup("claude-opus-4-7").expect("bare must price");
+        let anth = lookup("anthropic/claude-opus-4-7").expect("anthropic/ prefix must price");
+        let or = lookup("openrouter/anthropic/claude-opus-4-7").expect("openrouter/anthropic/ prefix must price");
+        assert_eq!(bare.input_per_mtok, anth.input_per_mtok);
+        assert_eq!(bare.input_per_mtok, or.input_per_mtok);
+        assert_eq!(bare.output_per_mtok, anth.output_per_mtok);
+    }
+
+    #[test]
+    fn normalize_is_longest_prefix_first() {
+        // Guards against the generic `anthropic/` branch stealing the
+        // `openrouter/anthropic/` input and producing a still-prefixed
+        // (and thus unrecognized) result.
+        assert_eq!(
+            normalize_model_id("openrouter/anthropic/claude-opus-4-7"),
+            "claude-opus-4-7",
+        );
+        assert_eq!(
+            normalize_model_id("anthropic/claude-opus-4-7"),
+            "claude-opus-4-7",
+        );
+        assert_eq!(normalize_model_id("claude-opus-4-7"), "claude-opus-4-7");
     }
 
     #[test]
