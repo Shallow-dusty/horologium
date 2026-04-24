@@ -20,7 +20,7 @@ Claude Code 状态栏与用量解析的统一 Rust CLI。
 
 v1.1 修了 v1.0 审出来的 7 项：bash banker's rounding parity、worktree origin_web_url、ssh:// 多变体归一化、URL percent-encoding、hyperlinks 关闭时 IO 短路、IO 级测试覆盖、README 文档口径。详见 `docs/roadmap.md` 决策日志。
 
-2026-04-23 起：`~/.claude/settings.json` 的 statusLine 已指向 `horologium status`（bash 原版备份于 `~/.backups/claude/`）；`tests/parity/` 下新增 snapshot harness（7 fixtures × 5 modes = 35 cases），`run.sh --vs-bash` 附带反向发现 bash 两处 bug，已记于 `tests/parity/known-diffs.md`。
+2026-04-23 起：`~/.claude/settings.json` 的 statusLine 已指向 `horologium status`（bash 原版备份于 `~/.backups/claude/`）；`tests/parity/` 下新增 snapshot harness（10 fixtures × 5 modes = 50 cases），`run.sh --vs-bash` 附带反向发现 bash 两处 bug，已记于 `tests/parity/known-diffs.md`。
 
 2026-04-23：**Phase 2 `stat daily` MVP 完成**。填补 Max 订阅历史统计空白（官方 `/usage` TUI 仅覆盖当前会话）。跨会话 / 按日聚合，支持 `--since / --until / --project / --json / --root`，按 `message.id` 跨文件 dedup。定价表用 LiteLLM 快照嵌入 + `scripts/gen-pricing.py` 发版时 regen。本机 665 文件 / 517 MB / 14 天历史在 8 核上 ~60 ms 出结果。`session` / `blocks` 子命令延后到 v2.x（非 Max 用户刚需）。
 
@@ -70,6 +70,6 @@ tests/parity/
 
 ## 未完事项备忘
 
-- v1.0.0 / v1.1.0 已 push 至 `origin/main` 且建 GitHub Release（2026-04-23）
+- 已发布版本：v1.0.0 / v1.1.0（Phase 1）与 v2.0.0 / v2.0.1（Phase 2 `stat daily` MVP）均已 push 至 `origin/main` 并建 GitHub Release
 - 2 周 dogfooding 观测期进行中（起始 2026-04-23），观察 `horologium status` 作为 statusLine 的稳定性；有问题随时回退到 `~/.backups/claude/statusline.sh.bash-v1.20260423.bak`
-- Phase 2 `stat`、Phase 3 `configure` 未启动
+- `stat session` / `stat blocks` 子命令延后到 v2.x；Phase 3 `configure` 未启动
