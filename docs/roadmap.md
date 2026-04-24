@@ -47,7 +47,8 @@
 | 与 ccusage 黄金样本对照验证 | ⏳ 延后到 v2.x |
 
 **实测**：本机 665 JSONL / 517 MB / 14 天历史 → **0.058 s**（rayon 8 核 7.4× 并行度），
-扫出 14,824 条 unique assistant 记录 / TOTAL $1761.36。二进制从 802 KB 涨到 1082 KB
+扫出 14,824 条 unique assistant 记录 / TOTAL $1761.36（v2.0.1 口径；v2.0.2
+修正 1h cache 定价后同语料会略低 ~6-7%）。二进制从 802 KB 涨到 1082 KB
 （chrono + rayon 进入代码路径）。
 
 **定价更新**：`scripts/gen-pricing.py` 从 LiteLLM 的
