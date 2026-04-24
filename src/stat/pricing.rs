@@ -19,10 +19,13 @@
 //! - We store $/Mtok (5.0 in the example) so rendering & tests read
 //!   naturally.
 //!
-//! Cache-write tiers (Anthropic public pricing):
-//! - `ephemeral_5m` — the default from LiteLLM's `cache_creation_input_token_cost`
-//! - `ephemeral_1h` — exactly 2× the 5m rate (not exposed by LiteLLM; hardcoded
-//!   per the published schedule)
+//! Cache-write tiers (Anthropic public pricing, verified 2026-04 at
+//! <https://platform.claude.com/docs/en/docs/build-with-claude/prompt-caching>):
+//! - `ephemeral_5m` — 1.25× base input; equals LiteLLM's
+//!   `cache_creation_input_token_cost`, used directly.
+//! - `ephemeral_1h` — 2× **base input** (NOT 2× the 5m rate; the ratio
+//!   1h/5m is 1.6, not 2). LiteLLM does not publish this column, so we
+//!   derive it from `input_cost_per_token`.
 
 use crate::stat::record::Record;
 use serde::Deserialize;
@@ -60,7 +63,7 @@ fn load_table() -> HashMap<String, PricingRow> {
                 input_per_mtok: p.input_cost_per_token * 1_000_000.0,
                 output_per_mtok: p.output_cost_per_token * 1_000_000.0,
                 cache_write_5m_per_mtok: p.cache_creation_input_token_cost * 1_000_000.0,
-                cache_write_1h_per_mtok: p.cache_creation_input_token_cost * 2_000_000.0,
+                cache_write_1h_per_mtok: p.input_cost_per_token * 2_000_000.0,
                 cache_read_per_mtok: p.cache_read_input_token_cost * 1_000_000.0,
             };
             (k, row)
@@ -150,27 +153,32 @@ mod tests {
 
     #[test]
     fn opus_4_7_pricing_matches_published_rates() {
-        // Anthropic's published rates for Opus 4.7:
-        //   $5/Mtok input, $25/Mtok output, $6.25/Mtok cache-write-5m,
-        //   $12.50/Mtok cache-write-1h, $0.50/Mtok cache-read
+        // Anthropic's published rates for Opus 4.7 (verified 2026-04 at
+        // <https://platform.claude.com/docs/en/docs/build-with-claude/prompt-caching>):
+        //   $5/Mtok input, $25/Mtok output,
+        //   $6.25/Mtok cache-write-5m (1.25× input),
+        //   $10/Mtok   cache-write-1h (2×    input),
+        //   $0.50/Mtok cache-read     (0.1×  input).
         let row = lookup("claude-opus-4-7").expect("claude-opus-4-7 missing from snapshot");
         assert!((row.input_per_mtok - 5.0).abs() < 1e-6);
         assert!((row.output_per_mtok - 25.0).abs() < 1e-6);
         assert!((row.cache_write_5m_per_mtok - 6.25).abs() < 1e-6);
-        assert!((row.cache_write_1h_per_mtok - 12.50).abs() < 1e-6);
+        assert!((row.cache_write_1h_per_mtok - 10.0).abs() < 1e-6);
         assert!((row.cache_read_per_mtok - 0.50).abs() < 1e-6);
     }
 
     #[test]
-    fn cache_1h_is_exactly_twice_5m() {
-        // Anthropic schedule: 1h ephemeral = 2× 5m ephemeral. Verify across
-        // every row in the table rather than just opus.
+    fn cache_1h_rate_is_twice_base_input() {
+        // Anthropic schedule (verified 2026-04): 1h ephemeral = 2× base
+        // input. LiteLLM does not publish the 1h column, so we derive it.
+        // If Anthropic ever changes the ratio, this invariant fires across
+        // every model in the table instead of silently over/under-charging.
         for (model_id, row) in table() {
             assert!(
-                (row.cache_write_1h_per_mtok - 2.0 * row.cache_write_5m_per_mtok).abs() < 1e-6,
-                "{} violates 2x rule: 5m={} 1h={}",
+                (row.cache_write_1h_per_mtok - 2.0 * row.input_per_mtok).abs() < 1e-6,
+                "{} violates 1h = 2× input rule: input={} 1h={}",
                 model_id,
-                row.cache_write_5m_per_mtok,
+                row.input_per_mtok,
                 row.cache_write_1h_per_mtok,
             );
         }

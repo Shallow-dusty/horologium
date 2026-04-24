@@ -114,8 +114,9 @@
 | 2026-04-23 | 新增 `tests/parity/` snapshot harness（7 fixtures × 5 modes = 35 cases）作为 NIT C 落地 | 未来 refactor 的安全网；`--vs-bash` 同时发现 bash 两处 bug（`xargs basename` 拆空格；`git branch --show-current` 读进程 cwd 而非 JSON 的 workspace.current_dir）—— horologium 均已正确处理，记入 `known-diffs.md` |
 | 2026-04-23 | Phase 2 范围重定位：从"外部 pipeline / 批处理差异化"改为"填补 Max 订阅历史统计空白" | 用户反馈：官方 `/usage` TUI 不覆盖历史/跨项目查询，Max 用户被堵死；原 roadmap 的"交互查看已被官方吸收"是错的 |
 | 2026-04-23 | 定价表用 LiteLLM 快照 `include_str!` 嵌入 + Python regen script，不走运行时 fetch | 启动无网络依赖 + 二进制体积 +4 KB 可接受；发版时重跑 `scripts/gen-pricing.py` 更新 |
-| 2026-04-23 | cache 1h write 价格 = 2× 5m（Anthropic 公开规则），表里硬编码；单测扫全表验证 2× 不变式 | LiteLLM 只给 5m 价；2× 规则是公开但未推送到 LiteLLM JSON；硬编码 + 不变式测试能让将来 Anthropic 调规则时立刻报错 |
+| 2026-04-23 | cache 1h write 价格硬编码（原记录："2× 5m"，**已于 2026-04-24 纠正，见本表末条**）；单测扫全表验证 | 原假设 LiteLLM 只给 5m 价，据此推断 1h = 2× 5m；事后核对 Anthropic 文档发现规则是 1h = 2× **base input** 而非 2× 5m |
 | 2026-04-23 | 跨文件 message-id dedup：fold 里保 `HashMap<id, PerIdSummary>`，reduce 后才 bucket 到 `BTreeMap<date, Totals>` | Claude Code 不应该跨 jsonl 重复 id，但备份 / rsync 可能复制文件；二阶段 dedup 顺带让 `unknown_models` 计数与 records 数永远一致 |
 | 2026-04-23 | Phase 2 `stat daily` MVP 发布，`session` / `blocks` 延后到 v2.x | `daily` 覆盖 Max 用户 90% 需求；`session` / `blocks` 是 ccusage 细分维度，Max 用户无刚需，不值得阻塞发版 |
 | 2026-04-23 | v2.0.1 = codex gpt-5.5 / gpt-5 双审后的 5 项修复（F4 walker 注释 / F2 JSON 诊断走 stderr / F1 divergent-dup 检测 / F5 空 project 归一化 / S2 model-id 前缀归一化） | 83→90 tests；F3 浮点求和顺序（无用户反馈）和 S5 malformed 细分（观察粒度非 correctness）延后 |
 | 2026-04-23 | MSRV 从 1.77 上调到 1.85 | 传递依赖 `getrandom v0.4.2` 需要 `edition2024` cargo feature（Rust 1.85 稳定），1.77 已无法解析 lockfile；顺带对齐 GitHub Actions CI 工作流的 toolchain pin |
+| 2026-04-24 | 纠正 cache 1h 定价公式：`1h = 2 × base input`（而非 2× 5m），公式改为 `p.input_cost_per_token × 2 × 10⁶`；不变式测试翻转为 `1h == 2 × input` 扫全表 | Anthropic 官方 prompt-caching 文档明确：5m = 1.25× input，1h = 2× input，比例 1h/5m = 1.6 而不是 2。原规则让 v2.0.0 / v2.0.1 的 1h cache 部分高估 25%，按 dogfooding 14 天语料估算 TOTAL 被误报 ~6.7%；codex 独立审核点出，WebFetch 官方文档交叉验证 |
