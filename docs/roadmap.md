@@ -121,3 +121,4 @@
 | 2026-04-23 | v2.0.1 = codex gpt-5.5 / gpt-5 双审后的 5 项修复（F4 walker 注释 / F2 JSON 诊断走 stderr / F1 divergent-dup 检测 / F5 空 project 归一化 / S2 model-id 前缀归一化） | 83→90 tests；F3 浮点求和顺序（无用户反馈）和 S5 malformed 细分（观察粒度非 correctness）延后 |
 | 2026-04-23 | MSRV 从 1.77 上调到 1.85 | 传递依赖 `getrandom v0.4.2` 需要 `edition2024` cargo feature（Rust 1.85 稳定），1.77 已无法解析 lockfile；顺带对齐 GitHub Actions CI 工作流的 toolchain pin |
 | 2026-04-24 | 纠正 cache 1h 定价公式：`1h = 2 × base input`（而非 2× 5m），公式改为 `p.input_cost_per_token × 2 × 10⁶`；不变式测试翻转为 `1h == 2 × input` 扫全表 | Anthropic 官方 prompt-caching 文档明确：5m = 1.25× input，1h = 2× input，比例 1h/5m = 1.6 而不是 2。原规则让 v2.0.0 / v2.0.1 的 1h cache 部分高估 25%，按 dogfooding 14 天语料估算 TOTAL 被误报 ~6.7%；codex 独立审核点出，WebFetch 官方文档交叉验证 |
+| 2026-04-24 | v2.0.2 发布：pricing 1h 公式纠正 + CLAUDE.md 陈旧口径刷新 + 新增 `docs/intro.md` 入门页 + README 样例按 v2.0.2 重跑 | dogfooding 期间账单误差是 correctness 问题，不值得留待 Phase 3 发版；按 vX.Y 策略立刻发 patch |
