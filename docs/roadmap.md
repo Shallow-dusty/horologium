@@ -28,7 +28,7 @@
 - **`vX.0`**：新 Phase 完成（如 v1.0 = Phase 1 完成，v2.0 = Phase 2 完成）
 - **`vX.Y`**：小 bug 修复 / 小功能增强（Y 递增）
 
-## Phase 2 — `stat`（用量解析） 🟡 MVP `daily` 完成
+## Phase 2 — `stat`（用量解析） ✅ v2.1.0
 
 **目标**（重定位于 2026-04-23）：**填补 Max 订阅的历史统计空白**。Claude Code
 `/usage` TUI 只看当前会话 + 当前窗口；Max 用户无法看到"这周花了多少 / 哪个项目最
@@ -42,7 +42,8 @@
 | 计数：input / output / cache-read / cache-write (5m + 1h) tokens | ✅ 2026-04-23 |
 | 成本估算（对齐 Anthropic 定价表，单独 `pricing.rs`） | ✅ 2026-04-23：LiteLLM 快照 4 KB 嵌入 |
 | 子命令：`stat daily` | ✅ 2026-04-23：按日 rollup + `--since/--until/--project/--json/--root` |
-| 子命令：`stat session` / `stat blocks`（5h 窗口）| ⏳ 延后到 v2.x（Max 用户非刚需） |
+| 子命令：`stat session` | ✅ 2026-04-25：按 JSONL 文件聚合，session 级过滤，`--sort-cost`，Codex 审核修正 |
+| 子命令：`stat blocks`（5h 窗口）| ✅ 2026-04-25：5h 固定窗口（00-05/05-10/10-15/15-20/20-00），复用 dedup pipeline |
 | `--json` 输出 | ✅ 2026-04-23：NDJSON 每行一对象 |
 | 与 ccusage 黄金样本对照验证 | ⏳ 延后到 v2.x |
 
