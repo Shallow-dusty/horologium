@@ -18,11 +18,13 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Render the status line (reads Claude Code JSON from stdin)
+    /// Render the status line (called by Claude Code via statusLine config, not for direct use)
     Status(status::StatusArgs),
     /// Analyze usage from ~/.claude/projects JSONL logs
+    ///
+    /// Example: horologium stat daily --since 2026-04-20
     Stat(stat::StatArgs),
-    /// Interactive TUI configurator (TODO)
+    /// Interactive TUI configurator (not yet implemented)
     Configure,
 }
 

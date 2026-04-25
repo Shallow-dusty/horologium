@@ -10,7 +10,7 @@ use anyhow::{Context, Result};
 use clap::Args;
 use owo_colors::OwoColorize;
 use serde::Deserialize;
-use std::io::Read;
+use std::io::{IsTerminal, Read};
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -115,6 +115,16 @@ const PL_COST_FG: u8 = 15;
 const ARROW: char = '\u{e0b0}';
 
 pub fn run(args: StatusArgs) -> Result<()> {
+    if std::io::stdin().is_terminal() {
+        eprintln!("This command is called by Claude Code automatically via the statusLine config.");
+        eprintln!("It reads session JSON from stdin and is not meant to be run directly.");
+        eprintln!();
+        eprintln!("To enable, add to ~/.claude/settings.json:");
+        eprintln!(r#"  "statusLine": {{ "type": "command", "command": "horologium status" }}"#);
+        eprintln!();
+        eprintln!("Try `horologium stat daily` for interactive usage analytics.");
+        std::process::exit(0);
+    }
     let mut buf = String::new();
     std::io::stdin()
         .read_to_string(&mut buf)
