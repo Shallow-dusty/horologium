@@ -16,7 +16,7 @@ Claude Code 状态栏与用量解析的统一 Rust CLI。
 - `--multiline`：身份行 + 用量行分开
 - `--hyperlinks`：dir / branch 段 OSC 8 可点击
 
-全功能模式冷启动 <1 ms（bash 35 ms → **45× 提速**）。43 个单元测试（含 7 个 worktree / IO 集成测试）。`tempfile` 仅作 dev-dependency；release 二进制依赖不变（clap / serde / serde_json / anyhow / owo-colors）。git 走手写 `.git/HEAD` + `commondir` 解析（worktree-aware），OSC 8 / 256 色 / percent-encoding 全手写 ANSI。
+全功能模式冷启动 <1 ms（bash 35 ms → **45× 提速**）。90 个单元测试（含 worktree / IO 集成测试）。release 依赖为 clap / serde / serde_json / anyhow / owo-colors / chrono / rayon；`tempfile` 仅作 dev-dependency。git 走手写 `.git/HEAD` + `commondir` 解析（worktree-aware），OSC 8 / 256 色 / percent-encoding 全手写 ANSI。
 
 v1.1 修了 v1.0 审出来的 7 项：bash banker's rounding parity、worktree origin_web_url、ssh:// 多变体归一化、URL percent-encoding、hyperlinks 关闭时 IO 短路、IO 级测试覆盖、README 文档口径。详见 `docs/roadmap.md` 决策日志。
 
@@ -70,6 +70,6 @@ tests/parity/
 
 ## 未完事项备忘
 
-- 已发布版本：v1.0.0 / v1.1.0（Phase 1）与 v2.0.0 / v2.0.1（Phase 2 `stat daily` MVP）均已 push 至 `origin/main` 并建 GitHub Release
+- 已发布版本：v1.0.0 / v1.1.0（Phase 1）与 v2.0.0 / v2.0.1 / v2.0.2（Phase 2 `stat daily` MVP + pricing patch）均已 push 至 `origin/main` 并建 GitHub Release
 - 2 周 dogfooding 观测期进行中（起始 2026-04-23），观察 `horologium status` 作为 statusLine 的稳定性；有问题随时回退到 `~/.backups/claude/statusline.sh.bash-v1.20260423.bak`
 - `stat session` / `stat blocks` 子命令延后到 v2.x；Phase 3 `configure` 未启动

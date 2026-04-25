@@ -86,11 +86,38 @@
 | `install.sh` 一键安装脚本 | ⏳ |
 | Homebrew tap 或 cargo-binstall 支持 | ⏳ |
 
+## Phase 5 — 多 Agent CLI 支持
+
+**目标**：将 Horologium 从 Claude Code 专属工具扩展为跨 Agent CLI 的统一状态栏 + 用量分析工具。
+
+| 里程碑 | 状态 |
+|---|---|
+| `status --source codex`：适配 Codex CLI stdin schema | ⏳ |
+| `status --source gemini`：适配 Gemini CLI stdin schema | ⏳ |
+| `stat daily --source codex`：扫描 Codex 日志目录 | ⏳ |
+| `stat daily --source gemini`：扫描 Gemini CLI 日志目录 | ⏳ |
+| 多源混合聚合（跨 CLI 的统一 daily 视图） | ⏳ |
+
+**优先级**：低于 Phase 2-4，待核心功能稳定后再启动。
+
+**设计原则**：核心渲染 / 聚合逻辑复用，只有输入解析和日志路径按 source 分流。
+
+## Phase 6 — Claude Code Plugin 壳
+
+**目标**：为纯 Claude Code 用户提供一键安装体验（plugin marketplace 分发）。
+
+| 里程碑 | 状态 |
+|---|---|
+| `plugin.json` 声明 statusLine 指向二进制 | ⏳ |
+| `/stat` slash command 包装 `horologium stat daily` | ⏳ |
+| 配置切换 skill（powerline/multiline/hyperlinks） | ⏳ |
+
+**优先级**：最低，Phase 5 完成后再评估。Plugin 壳是薄包装，不维护双版本。
+
 ## 非目标（明确不做）
 
 - MCP server 形态：ccusage 有 `@ccusage/mcp`，Horologium 不做。MCP 不是热路径，走 Node 的成本可以接受。
 - 日志上传 / 云端同步：本工具纯本地。
-- 非 Claude Code 的 CLI 适配（codex / amp / opencode）：保持单一 scope。
 
 ## 决策日志
 
