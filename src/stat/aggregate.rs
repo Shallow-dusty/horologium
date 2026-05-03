@@ -23,7 +23,8 @@
 //! anomaly via stderr.
 
 use super::pricing::{cost_for_record, is_silent_unknown, lookup};
-use super::record::{parse_line, Record};
+use super::record::{ParserState, Record};
+use crate::source::Source;
 use chrono::{DateTime, Local, NaiveDate, Timelike, Utc};
 use rayon::prelude::*;
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -173,12 +174,13 @@ impl LocalAccumulator {
         }
     }
 
-    fn consume_file(&mut self, path: &Path, filters: &Filters) {
+    fn consume_file(&mut self, path: &Path, filters: &Filters, source: Source) {
         let file = match File::open(path) {
             Ok(f) => f,
             Err(_) => return,
         };
         let reader = BufReader::new(file);
+        let mut parser = ParserState::new(source);
         for line_result in reader.lines() {
             let Ok(line) = line_result else {
                 self.malformed += 1;
@@ -187,7 +189,7 @@ impl LocalAccumulator {
             if line.is_empty() {
                 continue;
             }
-            match parse_line(&line) {
+            match parser.parse_line(&line) {
                 Ok(Some(record)) => self.consume_record(record, filters),
                 Ok(None) => {}
                 Err(_) => self.malformed += 1,
@@ -311,12 +313,14 @@ pub struct SessionReport {
 fn aggregate_one_session(
     path: &Path,
     filters: &Filters,
+    source: Source,
 ) -> (Option<SessionSummary>, u64, BTreeMap<String, u64>) {
     let file = match File::open(path) {
         Ok(f) => f,
         Err(_) => return (None, 0, BTreeMap::new()),
     };
     let reader = BufReader::new(file);
+    let mut parser = ParserState::new(source);
     let mut totals = Totals::default();
     let mut malformed: u64 = 0;
     let mut unknown_models: BTreeMap<String, u64> = BTreeMap::new();
@@ -333,7 +337,7 @@ fn aggregate_one_session(
         if line.is_empty() {
             continue;
         }
-        match parse_line(&line) {
+        match parser.parse_line(&line) {
             Ok(Some(record)) => {
                 if !seen_ids.insert(record.message_id.clone()) {
                     continue;
@@ -442,9 +446,17 @@ fn aggregate_one_session(
 
 /// Aggregate all JSONL files as individual sessions.
 pub fn aggregate_sessions(paths: &[PathBuf], filters: &Filters) -> SessionReport {
+    aggregate_sessions_source(paths, filters, Source::Claude)
+}
+
+pub fn aggregate_sessions_source(
+    paths: &[PathBuf],
+    filters: &Filters,
+    source: Source,
+) -> SessionReport {
     let results: Vec<_> = paths
         .par_iter()
-        .map(|path| aggregate_one_session(path, filters))
+        .map(|path| aggregate_one_session(path, filters, source))
         .collect();
 
     let mut sessions = Vec::new();
@@ -474,10 +486,14 @@ pub fn aggregate_sessions(paths: &[PathBuf], filters: &Filters) -> SessionReport
 /// a single `Report`. Caller is responsible for discovering paths
 /// (see `walker::find_jsonl`) and for supplying filters consistently.
 pub fn aggregate_daily(paths: &[PathBuf], filters: &Filters) -> Report {
+    aggregate_daily_source(paths, filters, Source::Claude)
+}
+
+pub fn aggregate_daily_source(paths: &[PathBuf], filters: &Filters, source: Source) -> Report {
     paths
         .par_iter()
         .fold(LocalAccumulator::default, |mut acc, path| {
-            acc.consume_file(path, filters);
+            acc.consume_file(path, filters, source);
             acc
         })
         .reduce(LocalAccumulator::default, LocalAccumulator::merge)
@@ -486,10 +502,18 @@ pub fn aggregate_daily(paths: &[PathBuf], filters: &Filters) -> Report {
 
 /// Same dedup pipeline as `aggregate_daily`, but buckets into 5-hour blocks.
 pub fn aggregate_blocks(paths: &[PathBuf], filters: &Filters) -> BlockReport {
+    aggregate_blocks_source(paths, filters, Source::Claude)
+}
+
+pub fn aggregate_blocks_source(
+    paths: &[PathBuf],
+    filters: &Filters,
+    source: Source,
+) -> BlockReport {
     paths
         .par_iter()
         .fold(LocalAccumulator::default, |mut acc, path| {
-            acc.consume_file(path, filters);
+            acc.consume_file(path, filters, source);
             acc
         })
         .reduce(LocalAccumulator::default, LocalAccumulator::merge)

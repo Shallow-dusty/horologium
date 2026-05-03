@@ -11,6 +11,8 @@ use anyhow::{anyhow, Result};
 use chrono::{DateTime, Utc};
 use serde::Deserialize;
 
+use crate::source::Source;
+
 /// Single `assistant`-type record with the fields needed for costing.
 #[derive(Debug, Clone)]
 pub struct Record {
@@ -65,6 +67,145 @@ struct RawCacheCreation {
     ephemeral_1h_input_tokens: u64,
 }
 
+pub struct ParserState {
+    source: Source,
+    codex_context: CodexContext,
+}
+
+#[derive(Default)]
+struct CodexContext {
+    turn_id: Option<String>,
+    model: Option<String>,
+    cwd: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct CodexLine {
+    timestamp: Option<String>,
+    #[serde(rename = "type")]
+    kind: Option<String>,
+    payload: Option<serde_json::Value>,
+}
+
+#[derive(Deserialize)]
+struct CodexTurnContext {
+    turn_id: Option<String>,
+    cwd: Option<String>,
+    model: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct CodexTokenCount {
+    #[serde(default)]
+    last_token_usage: Option<CodexUsage>,
+    #[serde(default)]
+    total_token_usage: Option<CodexUsage>,
+}
+
+#[derive(Deserialize)]
+struct CodexUsage {
+    #[serde(default)]
+    input_tokens: u64,
+    #[serde(default)]
+    cached_input_tokens: u64,
+    #[serde(default)]
+    output_tokens: u64,
+}
+
+impl ParserState {
+    pub fn new(source: Source) -> Self {
+        Self {
+            source,
+            codex_context: CodexContext::default(),
+        }
+    }
+
+    pub fn parse_line(&mut self, line: &str) -> Result<Option<Record>> {
+        match self.source {
+            Source::Claude => parse_claude_line(line),
+            Source::Codex => self.parse_codex_line(line),
+        }
+    }
+
+    fn parse_codex_line(&mut self, line: &str) -> Result<Option<Record>> {
+        let raw: CodexLine = serde_json::from_str(line)?;
+        match raw.kind.as_deref() {
+            Some("turn_context") => {
+                let Some(payload) = raw.payload else {
+                    return Ok(None);
+                };
+                let ctx: CodexTurnContext = serde_json::from_value(payload)?;
+                if ctx.turn_id.is_some() {
+                    self.codex_context.turn_id = ctx.turn_id;
+                }
+                if ctx.cwd.is_some() {
+                    self.codex_context.cwd = ctx.cwd;
+                }
+                if ctx.model.is_some() {
+                    self.codex_context.model = ctx.model;
+                }
+                Ok(None)
+            }
+            Some("event_msg") => {
+                let Some(payload) = raw.payload else {
+                    return Ok(None);
+                };
+                if payload.get("type").and_then(|t| t.as_str()) != Some("token_count") {
+                    return Ok(None);
+                }
+                let timestamp_str = raw
+                    .timestamp
+                    .ok_or_else(|| anyhow!("codex token_count missing `timestamp`"))?;
+                let timestamp = DateTime::parse_from_rfc3339(&timestamp_str)
+                    .map_err(|e| anyhow!("bad RFC 3339 timestamp `{}`: {}", timestamp_str, e))?
+                    .with_timezone(&Utc);
+                let info = payload
+                    .get("info")
+                    .cloned()
+                    .ok_or_else(|| anyhow!("codex token_count missing `info`"))?;
+                let count: CodexTokenCount = serde_json::from_value(info)?;
+                let Some(usage) = count.last_token_usage.or(count.total_token_usage) else {
+                    return Ok(None);
+                };
+                if usage.input_tokens == 0
+                    && usage.cached_input_tokens == 0
+                    && usage.output_tokens == 0
+                {
+                    return Ok(None);
+                }
+
+                let model = self
+                    .codex_context
+                    .model
+                    .clone()
+                    .unwrap_or_else(|| "codex-unknown".into());
+                let turn_id = self
+                    .codex_context
+                    .turn_id
+                    .as_deref()
+                    .unwrap_or("unknown-turn");
+                let uncached_input = usage.input_tokens.saturating_sub(usage.cached_input_tokens);
+
+                Ok(Some(Record {
+                    timestamp,
+                    message_id: format!(
+                        "codex:{}:{}:{}:{}",
+                        turn_id, timestamp_str, usage.input_tokens, usage.output_tokens
+                    ),
+                    model,
+                    input_tokens: uncached_input,
+                    output_tokens: usage.output_tokens,
+                    cache_creation_5m_tokens: 0,
+                    cache_creation_1h_tokens: 0,
+                    cache_read_tokens: usage.cached_input_tokens,
+                    cwd: self.codex_context.cwd.clone(),
+                }))
+            }
+            _ => Ok(None),
+        }
+    }
+}
+
 /// Parse one JSONL line.
 ///
 /// - `Ok(Some(_))` — valid assistant record with usage
@@ -72,6 +213,10 @@ struct RawCacheCreation {
 /// - `Err(_)` — invalid JSON, or assistant missing timestamp / id / model
 ///   (corrupt line; caller should log and continue)
 pub fn parse_line(line: &str) -> Result<Option<Record>> {
+    parse_claude_line(line)
+}
+
+fn parse_claude_line(line: &str) -> Result<Option<Record>> {
     let raw: RawLine = serde_json::from_str(line)?;
     if raw.kind.as_deref() != Some("assistant") {
         return Ok(None);
@@ -213,5 +358,29 @@ mod tests {
         let r = parse_line(line).unwrap().unwrap();
         assert_eq!(r.cache_creation_5m_tokens, 700);
         assert_eq!(r.cache_creation_1h_tokens, 300);
+    }
+
+    #[test]
+    fn codex_parser_uses_turn_context_for_token_counts() {
+        let mut parser = ParserState::new(Source::Codex);
+        let ctx = r#"{"timestamp":"2026-05-03T09:00:00Z","type":"turn_context","payload":{"turn_id":"turn_1","cwd":"/work/project","model":"gpt-5.5"}}"#;
+        assert!(parser.parse_line(ctx).unwrap().is_none());
+
+        let count = r#"{"timestamp":"2026-05-03T09:00:05Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":1000,"cached_input_tokens":250,"output_tokens":125,"total_tokens":1125},"model_context_window":258400}}}"#;
+        let r = parser.parse_line(count).unwrap().unwrap();
+
+        assert_eq!(r.model, "gpt-5.5");
+        assert_eq!(r.cwd.as_deref(), Some("/work/project"));
+        assert_eq!(r.input_tokens, 750);
+        assert_eq!(r.cache_read_tokens, 250);
+        assert_eq!(r.output_tokens, 125);
+        assert!(r.message_id.contains("turn_1"));
+    }
+
+    #[test]
+    fn codex_parser_skips_non_token_events() {
+        let mut parser = ParserState::new(Source::Codex);
+        let line = r#"{"timestamp":"2026-05-03T09:00:00Z","type":"event_msg","payload":{"type":"task_started","turn_id":"turn_1"}}"#;
+        assert!(parser.parse_line(line).unwrap().is_none());
     }
 }

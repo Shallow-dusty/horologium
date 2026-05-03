@@ -141,7 +141,7 @@ fn daily(args: DailyArgs) -> Result<()> {
         );
     }
 
-    let report = aggregate::aggregate_daily(&paths, &filters);
+    let report = aggregate::aggregate_daily_source(&paths, &filters, args.source);
     let out = if args.json {
         format::format_ndjson(&report)
     } else {
@@ -175,7 +175,7 @@ fn session(args: SessionArgs) -> Result<()> {
         );
     }
 
-    let mut report = aggregate::aggregate_sessions(&paths, &filters);
+    let mut report = aggregate::aggregate_sessions_source(&paths, &filters, args.source);
     if args.sort_cost {
         report
             .sessions
@@ -239,7 +239,7 @@ fn blocks(args: BlocksArgs) -> Result<()> {
         );
     }
 
-    let report = aggregate::aggregate_blocks(&paths, &filters);
+    let report = aggregate::aggregate_blocks_source(&paths, &filters, args.source);
     let out = if args.json {
         format::format_blocks_ndjson(&report)
     } else {
