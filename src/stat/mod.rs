@@ -22,7 +22,7 @@ use crate::source::Source;
 
 mod aggregate;
 mod format;
-mod pricing;
+pub(crate) mod pricing;
 mod record;
 mod walker;
 

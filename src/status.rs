@@ -14,8 +14,13 @@ use std::io::{IsTerminal, Read};
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use crate::source::Source;
+
 #[derive(Args)]
 pub struct StatusArgs {
+    /// Input status source.
+    #[arg(long, value_enum, default_value_t = Source::Claude)]
+    source: Source,
     /// Render segments with Powerline arrow separators and background colors.
     /// Requires a Powerline-patched / Nerd Font for the  (U+E0B0) glyph.
     #[arg(long)]
@@ -77,6 +82,52 @@ struct Window {
     resets_at: Option<i64>,
 }
 
+#[derive(Deserialize)]
+struct CodexLine {
+    #[serde(rename = "type")]
+    kind: Option<String>,
+    payload: Option<serde_json::Value>,
+}
+
+#[derive(Deserialize)]
+struct CodexTurnContext {
+    cwd: Option<String>,
+    model: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct CodexTokenInfo {
+    #[serde(default)]
+    last_token_usage: Option<CodexUsage>,
+    #[serde(default)]
+    total_token_usage: Option<CodexUsage>,
+    model_context_window: Option<u64>,
+}
+
+#[derive(Clone, Deserialize)]
+struct CodexUsage {
+    #[serde(default)]
+    input_tokens: u64,
+    #[serde(default)]
+    cached_input_tokens: u64,
+    #[serde(default)]
+    output_tokens: u64,
+    #[serde(default)]
+    total_tokens: u64,
+}
+
+#[derive(Deserialize)]
+struct CodexRateLimits {
+    primary: Option<CodexRateWindow>,
+    secondary: Option<CodexRateWindow>,
+}
+
+#[derive(Deserialize)]
+struct CodexRateWindow {
+    used_percent: Option<f64>,
+    resets_at: Option<i64>,
+}
+
 /// One renderable unit of the statusline. Carries both a plain-mode string
 /// (pre-colored via `owo-colors` for rate segments, raw otherwise) and a
 /// background color index for powerline rendering. The two modes share the
@@ -130,7 +181,7 @@ pub fn run(args: StatusArgs) -> Result<()> {
     std::io::stdin()
         .read_to_string(&mut buf)
         .context("read stdin")?;
-    let data: Input = serde_json::from_str(&buf).context("parse stdin JSON")?;
+    let data = parse_input(&buf, args.source)?;
 
     let segments = build_segments(&data, &cfg);
 
@@ -144,6 +195,121 @@ pub fn run(args: StatusArgs) -> Result<()> {
         render_row(&segments, &opts)
     };
     println!("{}", output);
+    Ok(())
+}
+
+fn parse_input(buf: &str, source: Source) -> Result<Input> {
+    match source {
+        Source::Claude => serde_json::from_str(buf).context("parse Claude status JSON"),
+        Source::Codex => parse_codex_input(buf),
+    }
+}
+
+fn parse_codex_input(buf: &str) -> Result<Input> {
+    let mut data = Input::default();
+    for line in codex_json_lines(buf) {
+        let raw: CodexLine = serde_json::from_str(line).context("parse Codex status JSON")?;
+        match raw.kind.as_deref() {
+            Some("turn_context") => {
+                let Some(payload) = raw.payload else {
+                    continue;
+                };
+                let ctx: CodexTurnContext =
+                    serde_json::from_value(payload).context("parse Codex turn_context")?;
+                if let Some(model) = ctx.model {
+                    data.model.display_name = Some(model);
+                }
+                if let Some(cwd) = ctx.cwd {
+                    data.workspace.current_dir = Some(cwd);
+                }
+            }
+            Some("event_msg") => {
+                let Some(payload) = raw.payload else {
+                    continue;
+                };
+                if payload.get("type").and_then(|t| t.as_str()) != Some("token_count") {
+                    continue;
+                }
+                if let Some(info) = payload.get("info").filter(|v| !v.is_null()).cloned() {
+                    apply_codex_token_info(&mut data, info)?;
+                }
+                if let Some(rate_limits) =
+                    payload.get("rate_limits").filter(|v| !v.is_null()).cloned()
+                {
+                    apply_codex_rate_limits(&mut data, rate_limits)?;
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok(data)
+}
+
+fn codex_json_lines(buf: &str) -> Vec<&str> {
+    let trimmed = buf.trim();
+    if trimmed.is_empty() {
+        return Vec::new();
+    }
+    if trimmed.lines().count() == 1 {
+        vec![trimmed]
+    } else {
+        trimmed
+            .lines()
+            .filter(|line| !line.trim().is_empty())
+            .collect()
+    }
+}
+
+fn apply_codex_token_info(data: &mut Input, info: serde_json::Value) -> Result<()> {
+    let info: CodexTokenInfo = serde_json::from_value(info).context("parse Codex token_count")?;
+    if let (Some(last), Some(window)) = (info.last_token_usage.as_ref(), info.model_context_window)
+    {
+        if window > 0 {
+            let tokens = if last.total_tokens > 0 {
+                last.total_tokens
+            } else {
+                last.input_tokens + last.output_tokens
+            };
+            data.context_window.used_percentage = Some(tokens as f64 * 100.0 / window as f64);
+        }
+    }
+
+    if let Some(total) = info.total_token_usage.as_ref() {
+        if let Some(model) = data.model.display_name.as_deref() {
+            data.cost.total_cost_usd = codex_usage_cost(model, total);
+        }
+    }
+    Ok(())
+}
+
+fn codex_usage_cost(model: &str, usage: &CodexUsage) -> Option<f64> {
+    let row = crate::stat::pricing::lookup(model)?;
+    let m = 1_000_000.0;
+    let uncached_input = usage.input_tokens.saturating_sub(usage.cached_input_tokens);
+    Some(
+        (uncached_input as f64 / m) * row.input_per_mtok
+            + (usage.cached_input_tokens as f64 / m) * row.cache_read_per_mtok
+            + (usage.output_tokens as f64 / m) * row.output_per_mtok,
+    )
+}
+
+fn apply_codex_rate_limits(data: &mut Input, rate_limits: serde_json::Value) -> Result<()> {
+    let rate_limits: CodexRateLimits =
+        serde_json::from_value(rate_limits).context("parse Codex rate_limits")?;
+    let five_hour = rate_limits.primary.map(|w| Window {
+        used_percentage: w.used_percent,
+        resets_at: w.resets_at,
+    });
+    let seven_day = rate_limits.secondary.map(|w| Window {
+        used_percentage: w.used_percent,
+        resets_at: w.resets_at,
+    });
+    if five_hour.is_some() || seven_day.is_some() {
+        data.rate_limits = Some(RateLimits {
+            five_hour,
+            seven_day,
+        });
+    }
     Ok(())
 }
 
@@ -602,6 +768,26 @@ mod tests {
             powerline_rate_colors(65, &default),
             powerline_rate_colors(65, &custom)
         );
+    }
+
+    #[test]
+    fn parse_codex_input_folds_context_tokens_and_rates() {
+        let input = r#"
+{"timestamp":"2026-05-03T09:00:00Z","type":"turn_context","payload":{"cwd":"/work/project","model":"gpt-5.5"}}
+{"timestamp":"2026-05-03T09:00:05Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":10000,"cached_input_tokens":4000,"output_tokens":500,"total_tokens":10500},"last_token_usage":{"input_tokens":1000,"cached_input_tokens":250,"output_tokens":125,"total_tokens":1125},"model_context_window":2250},"rate_limits":{"primary":{"used_percent":7.0,"resets_at":1777530376},"secondary":{"used_percent":64.0,"resets_at":1777961891}}}}
+"#;
+        let parsed = parse_input(input, Source::Codex).unwrap();
+        assert_eq!(parsed.model.display_name.as_deref(), Some("gpt-5.5"));
+        assert_eq!(
+            parsed.workspace.current_dir.as_deref(),
+            Some("/work/project")
+        );
+        assert_eq!(parsed.context_window.used_percentage, Some(50.0));
+        assert!(parsed.cost.total_cost_usd.unwrap() > 0.0);
+
+        let rl = parsed.rate_limits.unwrap();
+        assert_eq!(rl.five_hour.unwrap().used_percentage, Some(7.0));
+        assert_eq!(rl.seven_day.unwrap().used_percentage, Some(64.0));
     }
 
     #[test]
