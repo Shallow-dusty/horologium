@@ -262,6 +262,8 @@ enum ConfigureCommand {
         #[arg(long)]
         force: bool,
     },
+    /// Print a recommended native Codex CLI status line config snippet.
+    CodexStatusline,
     /// Validate the current config file.
     Check,
     /// Print the resolved config path.
@@ -271,9 +273,35 @@ enum ConfigureCommand {
 pub fn run(args: ConfigureArgs) -> Result<()> {
     match args.command {
         ConfigureCommand::Init { force } => cmd_init(force),
+        ConfigureCommand::CodexStatusline => cmd_codex_statusline(),
         ConfigureCommand::Check => cmd_check(),
         ConfigureCommand::Path => cmd_path(),
     }
+}
+
+pub fn generate_codex_statusline_toml() -> &'static str {
+    r#"# Add this to ~/.codex/config.toml.
+# Codex CLI renders status lines from native built-in items. It does not
+# currently call external statusLine commands like Claude Code.
+
+[tui]
+status_line = [
+  "model-with-reasoning",
+  "current-dir",
+  "git-branch",
+  "context-used",
+  "used-tokens",
+  "five-hour-limit",
+  "weekly-limit",
+  "task-progress",
+]
+status_line_use_colors = true
+"#
+}
+
+fn cmd_codex_statusline() -> Result<()> {
+    print!("{}", generate_codex_statusline_toml());
+    Ok(())
 }
 
 fn cmd_init(force: bool) -> Result<()> {
@@ -472,5 +500,22 @@ mod tests {
     fn generate_default_toml_is_parseable() {
         let s = generate_default_toml();
         let _cfg: Config = toml::from_str(&s).unwrap();
+    }
+
+    #[test]
+    fn generate_codex_statusline_toml_is_parseable() {
+        let s = generate_codex_statusline_toml();
+        let parsed: toml::Value = toml::from_str(s).unwrap();
+        let items = parsed
+            .get("tui")
+            .and_then(|tui| tui.get("status_line"))
+            .and_then(|items| items.as_array())
+            .expect("status_line array");
+        assert!(items
+            .iter()
+            .any(|item| item.as_str() == Some("context-used")));
+        assert!(items
+            .iter()
+            .any(|item| item.as_str() == Some("weekly-limit")));
     }
 }

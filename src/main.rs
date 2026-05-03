@@ -11,7 +11,7 @@ mod status;
 #[command(
     name = "horologium",
     version,
-    about = "Claude Code status line and usage analytics"
+    about = "Agent CLI status helpers and usage analytics"
 )]
 struct Cli {
     #[command(subcommand)]
@@ -20,13 +20,13 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Render the status line (called by Claude Code via statusLine config, not for direct use)
+    /// Render a status line from Claude Code stdin or a Codex session JSONL.
     Status(status::StatusArgs),
-    /// Analyze usage from ~/.claude/projects JSONL logs
+    /// Analyze usage from agent JSONL logs.
     ///
     /// Example: horologium stat daily --since 2026-04-20
     Stat(stat::StatArgs),
-    /// Manage statusline configuration
+    /// Manage Horologium and agent statusline configuration.
     ///
     /// Example: horologium configure init
     Configure(config::ConfigureArgs),

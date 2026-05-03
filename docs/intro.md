@@ -62,6 +62,7 @@ Horologium 的 `stat daily` 子命令直接读本地的 `~/.claude/projects/**/*
 - `configure init` 生成默认配置
 - `configure check` 校验阈值、重复 segment、空 segment 列表
 - `configure path` 打印配置路径
+- `configure codex-statusline` 输出 Codex CLI 原生 `[tui].status_line` 推荐配置
 - `status` 自动读取配置；CLI flag 可临时覆盖渲染开关
 
 ### `--source codex`
@@ -73,6 +74,10 @@ Codex 兼容 MVP 已落地：
 - `stat session --source codex` 按 rollout 文件聚合
 - `stat blocks --source codex` 复用 5h block 视图
 - 成本列按 OpenAI API-equivalent USD 估算，token 口径来自 Codex `token_count.last_token_usage`
+
+Codex CLI 自身的 TUI 状态栏使用官方 `/statusline` / `[tui].status_line`。它当前只支持
+内置状态项，不支持 Claude Code 的 external command statusLine 协议；因此 Horologium
+不会承诺把自定义行嵌入 Codex 底部状态栏。
 
 ---
 

@@ -101,6 +101,11 @@ Codex `status` 会折叠 session JSONL 中最新的 `turn_context` 与 `token_co
 OpenAI API-equivalent USD 估算；Codex 订阅里的 credit 消耗可按 OpenAI 官方 Codex
 token-based rate card 对照。
 
+Codex CLI 的 TUI 状态栏请使用官方原生 `/statusline` 或 `[tui].status_line`。Codex
+当前只支持内置状态项，不支持 Claude Code 那种 external command statusLine 协议，
+所以 `horologium status --source codex` 适合调试/外部渲染 session JSONL，不会被
+Codex TUI 自动调用。
+
 ## `configure`
 
 默认配置文件路径：`~/.config/horologium/config.toml`。
@@ -110,6 +115,7 @@ horologium configure path        # 打印配置路径
 horologium configure init        # 生成默认配置
 horologium configure init --force
 horologium configure check       # 校验当前配置
+horologium configure codex-statusline  # 输出推荐的 ~/.codex/config.toml 片段
 ```
 
 `status` 会自动读取这个 TOML。命令行 flag 仍然优先：例如配置里 `powerline = false` 时，
@@ -121,6 +127,7 @@ horologium configure check       # 校验当前配置
 - `[render]`：`powerline` / `multiline` / `hyperlinks`
 - `[[segments]]`：按数组顺序渲染；删除某段即可隐藏；`bg` / `fg` / `row` 可覆盖 Powerline 色块和多行布局
 - `[thresholds]`：调整 rate limit 的绿/黄/红阈值
+- `configure codex-statusline`：输出 Codex CLI 原生 `[tui].status_line` 推荐配置
 
 ## `stat daily`
 
