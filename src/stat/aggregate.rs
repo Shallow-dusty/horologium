@@ -552,6 +552,24 @@ mod tests {
         )
     }
 
+    fn codex_context(turn_id: &str, model: &str, cwd: &str) -> String {
+        format!(
+            r#"{{"timestamp":"2026-05-03T09:00:00Z","type":"turn_context","payload":{{"turn_id":"{}","cwd":"{}","model":"{}"}}}}"#,
+            turn_id, cwd, model
+        )
+    }
+
+    fn codex_token_count(ts: &str, input: u64, cached: u64, output: u64) -> String {
+        format!(
+            r#"{{"timestamp":"{}","type":"event_msg","payload":{{"type":"token_count","info":{{"last_token_usage":{{"input_tokens":{},"cached_input_tokens":{},"output_tokens":{},"total_tokens":{}}},"model_context_window":258400}}}}}}"#,
+            ts,
+            input,
+            cached,
+            output,
+            input + output
+        )
+    }
+
     #[test]
     fn aggregates_single_file_by_day() {
         let tmp = tempfile::tempdir().unwrap();
@@ -594,6 +612,45 @@ mod tests {
         assert_eq!(r.rows[&d5].output_tokens, 1500);
         assert_eq!(r.rows[&d6].records, 1);
         assert_eq!(r.malformed_lines, 0);
+    }
+
+    #[test]
+    fn codex_daily_aggregates_token_count_events() {
+        let tmp = tempfile::tempdir().unwrap();
+        let ctx = codex_context("turn_1", "gpt-5.5", "/work/project");
+        let a = codex_token_count("2026-05-03T09:01:00Z", 1000, 250, 125);
+        let b = codex_token_count("2026-05-03T09:02:00Z", 2000, 500, 250);
+        let path = write_jsonl(tmp.path(), "codex.jsonl", &[&ctx, &a, &b]);
+
+        let r = aggregate_daily_source(&[path], &Filters::default(), Source::Codex);
+        let d = NaiveDate::from_ymd_opt(2026, 5, 3).unwrap();
+        assert_eq!(r.rows[&d].records, 2);
+        assert_eq!(r.rows[&d].input_tokens, 2250);
+        assert_eq!(r.rows[&d].cache_read_tokens, 750);
+        assert_eq!(r.rows[&d].output_tokens, 375);
+        assert!(r.rows[&d].cost_usd > 0.0);
+        assert_eq!(r.malformed_lines, 0);
+    }
+
+    #[test]
+    fn codex_sessions_and_blocks_use_same_parser() {
+        let tmp = tempfile::tempdir().unwrap();
+        let ctx = codex_context("turn_1", "gpt-5.5", "/work/project");
+        let a = codex_token_count("2026-05-03T09:01:00Z", 1000, 250, 125);
+        let path = write_jsonl(tmp.path(), "rollout-demo.jsonl", &[&ctx, &a]);
+
+        let sessions = aggregate_sessions_source(
+            std::slice::from_ref(&path),
+            &Filters::default(),
+            Source::Codex,
+        );
+        assert_eq!(sessions.sessions.len(), 1);
+        assert_eq!(sessions.sessions[0].project, "project");
+        assert_eq!(sessions.sessions[0].totals.records, 1);
+
+        let blocks = aggregate_blocks_source(&[path], &Filters::default(), Source::Codex);
+        assert_eq!(blocks.rows.len(), 1);
+        assert_eq!(blocks.rows.values().next().unwrap().records, 1);
     }
 
     #[test]
