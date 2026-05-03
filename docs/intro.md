@@ -64,6 +64,16 @@ Horologium 的 `stat daily` 子命令直接读本地的 `~/.claude/projects/**/*
 - `configure path` 打印配置路径
 - `status` 自动读取配置；CLI flag 可临时覆盖渲染开关
 
+### `--source codex`
+
+Codex 兼容 MVP 已落地：
+
+- `status --source codex` 读取 Codex session JSONL，渲染最新 model / cwd / context / cost / rate limit
+- `stat daily --source codex` 聚合 `~/.codex/sessions/**/*.jsonl`
+- `stat session --source codex` 按 rollout 文件聚合
+- `stat blocks --source codex` 复用 5h block 视图
+- 成本列按 OpenAI API-equivalent USD 估算，token 口径来自 Codex `token_count.last_token_usage`
+
 ---
 
 ## 它的技术承诺
@@ -90,7 +100,7 @@ Horologium 的 `stat daily` 子命令直接读本地的 `~/.claude/projects/**/*
 
 - **不做 MCP server 形态**：ccusage 有 `@ccusage/mcp`，Horologium 不做（MCP 不是热路径，Node 的成本可以接受）
 - **不上云 / 不上传日志**：纯本地
-- **当前版本仍只适配 Claude Code**：Codex 兼容性会单独开分支推进，避免和配置改动混在一起
+- **Gemini / Amp / OpenCode 尚未适配**：当前多源支持覆盖 Claude Code 与 Codex
 
 ---
 

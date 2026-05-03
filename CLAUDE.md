@@ -28,7 +28,9 @@ v1.1 修了 v1.0 审出来的 7 项：bash banker's rounding parity、worktree o
 
 2026-05-03：**Phase 3 `configure` TOML MVP 完成**。新增 `~/.config/horologium/config.toml` 持久配置，`configure init/check/path`，支持 render 开关、segment 顺序/隐藏、row、Powerline 256 色和 rate threshold。坏配置由 `status` stderr 告警并回退默认；parity harness 通过 `HOROLOGIUM_CONFIG=/dev/null` 保持确定性。
 
-下一步：在干净工作区上开 Codex 兼容性分支。
+2026-05-03：**Phase 5 Codex 兼容 MVP 完成**。新增 `--source codex`，`status` 可读取 Codex session JSONL 并折叠 `turn_context` + `token_count`；`stat daily/session/blocks` 默认扫描 `~/.codex/sessions`。OpenAI/Codex 模型内置 GPT-5.5 / GPT-5.4 / GPT-5.4 mini / GPT-5.3-Codex / GPT-5.2 费率。
+
+下一步：补充发布工程或继续 Gemini source。
 
 ## 目录结构
 
@@ -37,6 +39,7 @@ src/
 ├── main.rs       # clap 分派
 ├── status.rs     # Phase 1: 状态栏渲染
 ├── git.rs        # .git/HEAD + origin URL 手写解析
+├── source.rs     # Claude / Codex source 分流
 ├── stat/         # Phase 2: JSONL 用量分析
 │   ├── mod.rs        # CLI + dispatch
 │   ├── walker.rs     # 递归扫 .jsonl
@@ -76,4 +79,4 @@ tests/parity/
 
 - 已发布版本：v1.0.0 / v1.1.0（Phase 1）与 v2.0.0 / v2.0.1 / v2.0.2 / v2.1.0（Phase 2）均已 push 至 `origin/main` 并建 GitHub Release
 - 2 周 dogfooding 观测期进行中（起始 2026-04-23），观察 `horologium status` 作为 statusLine 的稳定性；有问题随时回退到 `~/.backups/claude/statusline.sh.bash-v1.20260423.bak`
-- `configure` TOML MVP 已完成；ratatui TUI、写入 `~/.claude/settings.json` 和 git-status widget 后续再评估
+- `configure` TOML MVP 与 Codex source MVP 已完成；ratatui TUI、写入 `~/.claude/settings.json`、git-status widget、Gemini source 后续再评估

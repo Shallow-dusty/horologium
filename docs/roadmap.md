@@ -99,9 +99,12 @@ TOML + `configure check` 足够，TUI 不作为当前兼容性工作的前置条
 
 | 里程碑 | 状态 |
 |---|---|
-| `status --source codex`：适配 Codex CLI stdin schema | ⏳ |
+| `status --source codex`：适配 Codex session JSONL | ✅ 2026-05-03：折叠 `turn_context` + `token_count`，复用现有渲染/config |
 | `status --source gemini`：适配 Gemini CLI stdin schema | ⏳ |
-| `stat daily --source codex`：扫描 Codex 日志目录 | ⏳ |
+| `stat daily --source codex`：扫描 Codex 日志目录 | ✅ 2026-05-03：默认 `~/.codex/sessions`，解析 `token_count.last_token_usage` |
+| `stat session --source codex`：按 Codex rollout 文件聚合 | ✅ 2026-05-03：session 过滤/排序复用 |
+| `stat blocks --source codex`：按 5h block 聚合 Codex token usage | ✅ 2026-05-03：block 逻辑复用 |
+| OpenAI / Codex 模型成本估算 | ✅ 2026-05-03：GPT-5.5/5.4/5.4 mini + GPT-5.3-Codex/5.2 |
 | `stat daily --source gemini`：扫描 Gemini CLI 日志目录 | ⏳ |
 | 多源混合聚合（跨 CLI 的统一 daily 视图） | ⏳ |
 

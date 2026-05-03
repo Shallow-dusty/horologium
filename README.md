@@ -24,6 +24,7 @@ Horologium 做三件事：
 - Phase 1 `status`：**v1.1 已完成 + dogfooding 中**。全功能模式冷启动 <1 ms（比 bash 35 ms 快 35×+）。
 - Phase 2 `stat`：**v2.1.0 已完成**。`daily` / `session` / `blocks` 覆盖历史、会话和 5h 窗口聚合。
 - Phase 3 `configure`：**TOML 配置 MVP 已实现**。支持生成/校验配置、调整渲染开关、segment 顺序/隐藏、Powerline 颜色和阈值。
+- Phase 5 `--source codex`：**Codex 兼容 MVP 已实现**。`status` / `stat daily` / `stat session` / `stat blocks` 均可读 Codex session JSONL。
 
 路线图详见 [`docs/roadmap.md`](docs/roadmap.md)。
 
@@ -77,6 +78,29 @@ Opus 4.7  01.Horologium  main  15%  $1.23  5h:75%⏳2h14m  7d:92%⏳3d5h
 
 示例：`horologium status --powerline --multiline --hyperlinks`
 
+## 数据源
+
+默认数据源是 Claude Code。Codex 兼容通过 `--source codex` 开启：
+
+```bash
+horologium status --source codex < ~/.codex/sessions/2026/05/03/rollout-xxx.jsonl
+horologium stat daily --source codex
+horologium stat session --source codex --sort-cost
+horologium stat blocks --source codex
+```
+
+默认日志路径：
+
+```text
+claude  ~/.claude/projects
+codex   ~/.codex/sessions
+```
+
+Codex `status` 会折叠 session JSONL 中最新的 `turn_context` 与 `token_count` 事件，
+复用同一套 segment、Powerline、多行、超链接和 TOML 配置。Codex 成本列使用
+OpenAI API-equivalent USD 估算；Codex 订阅里的 credit 消耗可按 OpenAI 官方 Codex
+token-based rate card 对照。
+
 ## `configure`
 
 默认配置文件路径：`~/.config/horologium/config.toml`。
@@ -111,6 +135,7 @@ horologium stat daily --since 2026-04-01 --until 2026-04-23
 horologium stat daily --project Horologium     # cwd 子串过滤
 horologium stat daily --json                   # NDJSON，pipe 到 jq
 horologium stat daily --root /other/path       # 指向非默认 projects 目录
+horologium stat daily --source codex           # 统计 ~/.codex/sessions
 ```
 
 输出示例：
@@ -124,9 +149,11 @@ Day         Records    Input   Cache-5m   Cache-1h   Cache-Read     Output     C
 TOTAL         2,439  143,801  1,377,333  8,650,732  329,175,976  2,226,451  $313.12
 ```
 
-定价表嵌在二进制里（`data/litellm-anthropic-pricing.json`，~4 KB，21 个
-claude-* 模型），源头是 LiteLLM 的 `model_prices_and_context_window.json`。
-重新生成：`scripts/gen-pricing.py`（curl + python 两步）。
+定价表嵌在二进制里。Claude 模型来自
+`data/litellm-anthropic-pricing.json`（源头是 LiteLLM 的
+`model_prices_and_context_window.json`，重新生成：`scripts/gen-pricing.py`）。
+OpenAI / Codex 模型内置 GPT-5.5、GPT-5.4、GPT-5.4 mini、GPT-5.3-Codex、
+GPT-5.2 的当前公开费率。
 
 未识别的模型（例如 Claude Code 内部用的 `<synthetic>` 标签）token 照算、
 cost 计 0，并在底部列出 warning。按 `message.id` 跨文件去重，消息不会被
@@ -177,6 +204,7 @@ cargo fmt -- --check                               # 格式
 
 - 不 fork 不绑定，schema 对齐 Claude Code 官方 `statusLine` stdin JSON 规范
 - `stat` 子命令会兼容 ccusage 的 JSONL 路径约定（`~/.claude/projects/*.jsonl`）
+- Codex 兼容读取本地 `~/.codex/sessions/**/*.jsonl`，不依赖 Codex 私有运行时
 - 不依赖 ccusage/ccstatusline 任何运行时
 
 ## License
