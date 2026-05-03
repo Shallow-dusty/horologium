@@ -18,6 +18,8 @@ use chrono::NaiveDate;
 use clap::{Args, Subcommand};
 use std::path::PathBuf;
 
+use crate::source::Source;
+
 mod aggregate;
 mod format;
 mod pricing;
@@ -42,6 +44,9 @@ enum StatCommand {
 
 #[derive(Args)]
 struct BlocksArgs {
+    /// Input log source.
+    #[arg(long, value_enum, default_value_t = Source::Claude)]
+    source: Source,
     /// Inclusive lower bound on record date, YYYY-MM-DD (local tz).
     #[arg(long)]
     since: Option<String>,
@@ -54,13 +59,16 @@ struct BlocksArgs {
     /// Emit one JSON object per block (pipe-friendly) instead of a table.
     #[arg(long)]
     json: bool,
-    /// Override the projects root (default: $HOME/.claude/projects).
+    /// Override the logs root (default depends on --source).
     #[arg(long)]
     root: Option<PathBuf>,
 }
 
 #[derive(Args)]
 struct SessionArgs {
+    /// Input log source.
+    #[arg(long, value_enum, default_value_t = Source::Claude)]
+    source: Source,
     /// Inclusive lower bound on session start date, YYYY-MM-DD (local tz).
     #[arg(long)]
     since: Option<String>,
@@ -73,7 +81,7 @@ struct SessionArgs {
     /// Emit one JSON object per session (pipe-friendly) instead of a table.
     #[arg(long)]
     json: bool,
-    /// Override the projects root (default: $HOME/.claude/projects).
+    /// Override the logs root (default depends on --source).
     #[arg(long)]
     root: Option<PathBuf>,
     /// Sort by cost descending (default: chronological).
@@ -83,6 +91,9 @@ struct SessionArgs {
 
 #[derive(Args)]
 struct DailyArgs {
+    /// Input log source.
+    #[arg(long, value_enum, default_value_t = Source::Claude)]
+    source: Source,
     /// Inclusive lower bound on record date, YYYY-MM-DD (local tz).
     #[arg(long)]
     since: Option<String>,
@@ -97,7 +108,7 @@ struct DailyArgs {
     /// Emit one JSON object per row (pipe-friendly) instead of a table.
     #[arg(long)]
     json: bool,
-    /// Override the projects root (default: $HOME/.claude/projects).
+    /// Override the logs root (default depends on --source).
     #[arg(long)]
     root: Option<PathBuf>,
 }
@@ -111,7 +122,7 @@ pub fn run(args: StatArgs) -> Result<()> {
 }
 
 fn daily(args: DailyArgs) -> Result<()> {
-    let root = resolve_root(args.root.clone())?;
+    let root = resolve_root(args.root.clone(), args.source)?;
     let filters = build_filters(&args)?;
     let paths = walker::find_jsonl(&root);
 
@@ -148,7 +159,7 @@ fn daily(args: DailyArgs) -> Result<()> {
 }
 
 fn session(args: SessionArgs) -> Result<()> {
-    let root = resolve_root(args.root.clone())?;
+    let root = resolve_root(args.root.clone(), args.source)?;
     let filters = build_filters_from_session_args(&args)?;
     let paths = walker::find_jsonl(&root);
 
@@ -212,7 +223,7 @@ fn build_filters_from_session_args(args: &SessionArgs) -> Result<aggregate::Filt
 }
 
 fn blocks(args: BlocksArgs) -> Result<()> {
-    let root = resolve_root(args.root.clone())?;
+    let root = resolve_root(args.root.clone(), args.source)?;
     let filters = build_filters_from_blocks_args(&args)?;
     let paths = walker::find_jsonl(&root);
 
@@ -297,13 +308,13 @@ fn emit_diagnostics_to_stderr(report: &aggregate::Report) {
     }
 }
 
-fn resolve_root(override_path: Option<PathBuf>) -> Result<PathBuf> {
+fn resolve_root(override_path: Option<PathBuf>, source: Source) -> Result<PathBuf> {
     if let Some(p) = override_path {
         return Ok(p);
     }
-    let home =
-        std::env::var_os("HOME").ok_or_else(|| anyhow!("$HOME not set; pass --root explicitly"))?;
-    Ok(PathBuf::from(home).join(".claude/projects"))
+    source
+        .default_root()
+        .ok_or_else(|| anyhow!("$HOME not set; pass --root explicitly for {} logs", source))
 }
 
 fn build_filters(args: &DailyArgs) -> Result<aggregate::Filters> {
@@ -330,6 +341,7 @@ mod tests {
 
     fn empty_args() -> DailyArgs {
         DailyArgs {
+            source: Source::Claude,
             since: None,
             until: None,
             project: None,
@@ -340,7 +352,7 @@ mod tests {
 
     #[test]
     fn resolve_root_uses_override_when_set() {
-        let p = resolve_root(Some(PathBuf::from("/custom/root"))).unwrap();
+        let p = resolve_root(Some(PathBuf::from("/custom/root")), Source::Codex).unwrap();
         assert_eq!(p, PathBuf::from("/custom/root"));
     }
 

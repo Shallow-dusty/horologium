@@ -3,6 +3,7 @@ use clap::{Parser, Subcommand};
 
 mod config;
 mod git;
+mod source;
 mod stat;
 mod status;
 
