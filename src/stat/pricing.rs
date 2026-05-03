@@ -42,6 +42,38 @@ pub struct PricingRow {
     pub cache_read_per_mtok: f64,
 }
 
+const GPT_5_5: PricingRow = PricingRow {
+    input_per_mtok: 5.00,
+    output_per_mtok: 30.00,
+    cache_write_5m_per_mtok: 0.0,
+    cache_write_1h_per_mtok: 0.0,
+    cache_read_per_mtok: 0.50,
+};
+
+const GPT_5_4: PricingRow = PricingRow {
+    input_per_mtok: 2.50,
+    output_per_mtok: 15.00,
+    cache_write_5m_per_mtok: 0.0,
+    cache_write_1h_per_mtok: 0.0,
+    cache_read_per_mtok: 0.25,
+};
+
+const GPT_5_4_MINI: PricingRow = PricingRow {
+    input_per_mtok: 0.75,
+    output_per_mtok: 4.50,
+    cache_write_5m_per_mtok: 0.0,
+    cache_write_1h_per_mtok: 0.0,
+    cache_read_per_mtok: 0.075,
+};
+
+const GPT_5_3_CODEX: PricingRow = PricingRow {
+    input_per_mtok: 1.75,
+    output_per_mtok: 14.00,
+    cache_write_5m_per_mtok: 0.0,
+    cache_write_1h_per_mtok: 0.0,
+    cache_read_per_mtok: 0.175,
+};
+
 #[derive(Deserialize)]
 struct LiteLLMPrice {
     #[serde(default)]
@@ -86,7 +118,21 @@ fn table() -> &'static HashMap<String, PricingRow> {
 /// prices correctly instead of silently falling into `unknown_models`.
 pub fn lookup(model_id: &str) -> Option<&'static PricingRow> {
     let normalized = normalize_model_id(model_id);
+    if let Some(row) = lookup_openai(normalized) {
+        return Some(row);
+    }
     table().get(normalized)
+}
+
+fn lookup_openai(model_id: &str) -> Option<&'static PricingRow> {
+    let model_id = model_id.strip_prefix("openai/").unwrap_or(model_id);
+    match model_id.to_ascii_lowercase().as_str() {
+        "gpt-5.5" => Some(&GPT_5_5),
+        "gpt-5.4" => Some(&GPT_5_4),
+        "gpt-5.4-mini" | "gpt-5.4 mini" => Some(&GPT_5_4_MINI),
+        "gpt-5.3-codex" | "gpt-5.2" => Some(&GPT_5_3_CODEX),
+        _ => None,
+    }
 }
 
 fn normalize_model_id(model_id: &str) -> &str {
@@ -203,6 +249,35 @@ mod tests {
         assert_eq!(bare.input_per_mtok, anth.input_per_mtok);
         assert_eq!(bare.input_per_mtok, or.input_per_mtok);
         assert_eq!(bare.output_per_mtok, anth.output_per_mtok);
+    }
+
+    #[test]
+    fn openai_models_are_priced() {
+        // OpenAI API Pricing, verified 2026-05-03:
+        // gpt-5.5 = $5 input / $0.50 cached input / $30 output per 1M tokens.
+        let row = lookup("gpt-5.5").expect("gpt-5.5 must price");
+        assert!((row.input_per_mtok - 5.0).abs() < 1e-6);
+        assert!((row.cache_read_per_mtok - 0.50).abs() < 1e-6);
+        assert!((row.output_per_mtok - 30.0).abs() < 1e-6);
+
+        let prefixed = lookup("openai/gpt-5.5").expect("openai/ prefix must price");
+        assert_eq!(row.input_per_mtok, prefixed.input_per_mtok);
+    }
+
+    #[test]
+    fn codex_rate_card_models_are_priced() {
+        // OpenAI Codex token-based rate card, verified 2026-05-03:
+        // GPT-5.3-Codex and GPT-5.2 both publish 43.75 / 4.375 / 350
+        // credits per 1M input / cached input / output. The public rate card
+        // aligns 25 credits with one API-equivalent USD for GPT-5.5 and
+        // GPT-5.4, so this row maps to $1.75 / $0.175 / $14.
+        let row = lookup("gpt-5.3-codex").expect("gpt-5.3-codex must price");
+        assert!((row.input_per_mtok - 1.75).abs() < 1e-6);
+        assert!((row.cache_read_per_mtok - 0.175).abs() < 1e-6);
+        assert!((row.output_per_mtok - 14.0).abs() < 1e-6);
+
+        let gpt52 = lookup("gpt-5.2").expect("gpt-5.2 must price");
+        assert_eq!(row.output_per_mtok, gpt52.output_per_mtok);
     }
 
     #[test]
