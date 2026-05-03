@@ -159,10 +159,12 @@ impl ParserState {
                 let timestamp = DateTime::parse_from_rfc3339(&timestamp_str)
                     .map_err(|e| anyhow!("bad RFC 3339 timestamp `{}`: {}", timestamp_str, e))?
                     .with_timezone(&Utc);
-                let info = payload
-                    .get("info")
-                    .cloned()
-                    .ok_or_else(|| anyhow!("codex token_count missing `info`"))?;
+                let Some(info) = payload.get("info").cloned() else {
+                    return Ok(None);
+                };
+                if info.is_null() {
+                    return Ok(None);
+                }
                 let count: CodexTokenCount = serde_json::from_value(info)?;
                 let Some(usage) = count.last_token_usage.or(count.total_token_usage) else {
                     return Ok(None);
@@ -212,6 +214,7 @@ impl ParserState {
 /// - `Ok(None)` — non-assistant row, or assistant lacking `message.usage`
 /// - `Err(_)` — invalid JSON, or assistant missing timestamp / id / model
 ///   (corrupt line; caller should log and continue)
+#[cfg(test)]
 pub fn parse_line(line: &str) -> Result<Option<Record>> {
     parse_claude_line(line)
 }

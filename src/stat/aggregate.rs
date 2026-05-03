@@ -445,6 +445,7 @@ fn aggregate_one_session(
 }
 
 /// Aggregate all JSONL files as individual sessions.
+#[cfg(test)]
 pub fn aggregate_sessions(paths: &[PathBuf], filters: &Filters) -> SessionReport {
     aggregate_sessions_source(paths, filters, Source::Claude)
 }
@@ -485,6 +486,7 @@ pub fn aggregate_sessions_source(
 /// Process every path in parallel via rayon, then reduce + finalize into
 /// a single `Report`. Caller is responsible for discovering paths
 /// (see `walker::find_jsonl`) and for supplying filters consistently.
+#[cfg(test)]
 pub fn aggregate_daily(paths: &[PathBuf], filters: &Filters) -> Report {
     aggregate_daily_source(paths, filters, Source::Claude)
 }
@@ -501,6 +503,7 @@ pub fn aggregate_daily_source(paths: &[PathBuf], filters: &Filters, source: Sour
 }
 
 /// Same dedup pipeline as `aggregate_daily`, but buckets into 5-hour blocks.
+#[cfg(test)]
 pub fn aggregate_blocks(paths: &[PathBuf], filters: &Filters) -> BlockReport {
     aggregate_blocks_source(paths, filters, Source::Claude)
 }
