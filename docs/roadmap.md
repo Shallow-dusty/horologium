@@ -58,24 +58,30 @@
 
 **不做**：
 - 定价表运行时网络拉取（选择每次发版 regen，规避启动时网络依赖）
-- TOML / YAML 配置覆盖（MVP 不需要，见有用户抱怨再加）
 - 成本模式切换（官方定价一种；ccusage 的 hybrid 非 Max 刚需）
 
-## Phase 3 — `configure`（TUI 配置器）
+## Phase 3 — `configure`（配置文件 MVP；TUI 后续）
 
-**目标**：可视化配置状态栏布局，零 bash/jq 手写。
+**目标**：先用可审计的 TOML 覆盖状态栏布局与渲染开关，满足日常配置需求；TUI
+配置器作为后续增强，不阻塞 Codex 兼容性分支。
 
 | 里程碑 | 状态 |
 |---|---|
-| ratatui 骨架 + crossterm 事件循环 | ⏳ |
-| Widget 列表：model / cwd / branch / ctx% / cost / 5h / 7d / git-status | ⏳ |
+| `status` 自动读取 `~/.config/horologium/config.toml` | ✅ 2026-05-03：缺失则默认，坏配置 stderr 告警并回退默认 |
+| `configure init/check/path` | ✅ 2026-05-03：生成默认 TOML、校验阈值/空列表/重复 segment、打印路径 |
+| 渲染开关持久化：powerline / multiline / hyperlinks | ✅ 2026-05-03：CLI flag 仍可临时覆盖为 true |
+| Segment 顺序 / 隐藏 / row / 256 色覆盖 | ✅ 2026-05-03：`[[segments]]` 数组即渲染顺序，删除即隐藏 |
+| Rate limit 阈值配置 | ✅ 2026-05-03：`green_below` / `red_above` 驱动 plain 与 Powerline 颜色 |
+| 测试隔离配置路径 | ✅ 2026-05-03：`HOROLOGIUM_CONFIG` 覆盖，parity harness 默认 `/dev/null` |
+| ratatui 骨架 + crossterm 事件循环 | ⏳ 后续，如 TOML 手改仍不够再做 |
+| Widget 列表扩展：git-status 等 | ⏳ |
 | 拖拽/上下移动排序 | ⏳ |
 | 颜色选择器（16/256/truecolor） | ⏳ |
 | 实时预览 | ⏳ |
-| 保存到 `~/.config/horologium/config.toml` | ⏳ |
 | 一键写入 `~/.claude/settings.json` | ⏳ |
 
-**风险**：ratatui 的开发量约是 Ink 的 2-3 倍。Phase 2 做完再评估是否有必要做 Phase 3 —— 也可能结论是"TOML 手改 + live reload 足够"。
+**决策**：先落地 TOML 配置 MVP。ratatui 的开发量约是 Ink 的 2-3 倍；如果手改
+TOML + `configure check` 足够，TUI 不作为当前兼容性工作的前置条件。
 
 ## Phase 4 — 发布工程
 
@@ -99,7 +105,8 @@
 | `stat daily --source gemini`：扫描 Gemini CLI 日志目录 | ⏳ |
 | 多源混合聚合（跨 CLI 的统一 daily 视图） | ⏳ |
 
-**优先级**：低于 Phase 2-4，待核心功能稳定后再启动。
+**优先级**：Phase 2 与 Phase 3 TOML 配置 MVP 收口后启动；Phase 4 发布工程不再作为
+Codex 兼容性的前置条件。
 
 **设计原则**：核心渲染 / 聚合逻辑复用，只有输入解析和日志路径按 source 分流。
 
@@ -150,3 +157,4 @@
 | 2026-04-23 | MSRV 从 1.77 上调到 1.85 | 传递依赖 `getrandom v0.4.2` 需要 `edition2024` cargo feature（Rust 1.85 稳定），1.77 已无法解析 lockfile；顺带对齐 GitHub Actions CI 工作流的 toolchain pin |
 | 2026-04-24 | 纠正 cache 1h 定价公式：`1h = 2 × base input`（而非 2× 5m），公式改为 `p.input_cost_per_token × 2 × 10⁶`；不变式测试翻转为 `1h == 2 × input` 扫全表 | Anthropic 官方 prompt-caching 文档明确：5m = 1.25× input，1h = 2× input，比例 1h/5m = 1.6 而不是 2。原规则让 v2.0.0 / v2.0.1 的 1h cache 部分高估 25%，按 dogfooding 14 天语料估算 TOTAL 被误报 ~6.7%；codex 独立审核点出，WebFetch 官方文档交叉验证 |
 | 2026-04-24 | v2.0.2 发布：pricing 1h 公式纠正 + CLAUDE.md 陈旧口径刷新 + 新增 `docs/intro.md` 入门页 + README 样例按 v2.0.2 重跑 | dogfooding 期间账单误差是 correctness 问题，不值得留待 Phase 3 发版；按 vX.Y 策略立刻发 patch |
+| 2026-05-03 | Phase 3 先做 TOML 配置 MVP 而不是完整 ratatui TUI | 当前真实需求是让状态栏布局/颜色/阈值可持久化；TUI 工作量较大且会推迟 Codex 兼容性分支，先用 `configure init/check/path` 收口配置能力 |

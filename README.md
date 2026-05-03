@@ -17,13 +17,13 @@ Horologium 做三件事：
 
 1. **`horologium status`** — 从 stdin 读 Claude Code JSON，打印状态栏。目标冷启动 < 20 ms。
 2. **`horologium stat`** — 解析 JSONL 日志，出用量/成本报表（替代 ccusage 主业）。
-3. **`horologium configure`** — 交互式 TUI 配置器（替代 ccstatusline 主业）。
+3. **`horologium configure`** — 管理状态栏 TOML 配置；TUI 配置器留作后续。
 
 ## 当前状态
 
 - Phase 1 `status`：**v1.1 已完成 + dogfooding 中**。全功能模式冷启动 <1 ms（比 bash 35 ms 快 35×+）。
-- Phase 2 `stat`：**`daily` MVP 已完成**（2026-04-23）。跨会话聚合、按日 rollup、项目过滤、JSON 输出。填补官方 `/usage` TUI 不覆盖的"历史 / 跨项目"查询空白。
-- Phase 3 `configure`：未实现。
+- Phase 2 `stat`：**v2.1.0 已完成**。`daily` / `session` / `blocks` 覆盖历史、会话和 5h 窗口聚合。
+- Phase 3 `configure`：**TOML 配置 MVP 已实现**。支持生成/校验配置、调整渲染开关、segment 顺序/隐藏、Powerline 颜色和阈值。
 
 路线图详见 [`docs/roadmap.md`](docs/roadmap.md)。
 
@@ -76,6 +76,27 @@ Opus 4.7  01.Horologium  main  15%  $1.23  5h:75%⏳2h14m  7d:92%⏳3d5h
 | `--hyperlinks` | dir 段和 branch 段包一层 OSC 8 超链接——dir 跳 `file://...`，branch 跳 git origin 的 web URL。现代终端（iTerm2 / WezTerm / Kitty / Alacritty 等）渲染为可点击；部分旧终端会把转义字节直接显示出来，因此默认关闭 |
 
 示例：`horologium status --powerline --multiline --hyperlinks`
+
+## `configure`
+
+默认配置文件路径：`~/.config/horologium/config.toml`。
+
+```bash
+horologium configure path        # 打印配置路径
+horologium configure init        # 生成默认配置
+horologium configure init --force
+horologium configure check       # 校验当前配置
+```
+
+`status` 会自动读取这个 TOML。命令行 flag 仍然优先：例如配置里 `powerline = false` 时，
+`horologium status --powerline` 会临时打开 Powerline。测试或脚本可以用
+`HOROLOGIUM_CONFIG=/path/to/config.toml` 指向另一份配置。
+
+配置支持：
+
+- `[render]`：`powerline` / `multiline` / `hyperlinks`
+- `[[segments]]`：按数组顺序渲染；删除某段即可隐藏；`bg` / `fg` / `row` 可覆盖 Powerline 色块和多行布局
+- `[thresholds]`：调整 rate limit 的绿/黄/红阈值
 
 ## `stat daily`
 
@@ -134,6 +155,7 @@ Horologium 对标 `~/.claude/statusline.sh` 的行为，在下列条件下保证
 |---|---|
 | CLI 分派 | `clap` derive |
 | JSON 解析 | `serde` + `serde_json` |
+| TOML 配置 | `toml` |
 | 颜色 | `owo-colors`（零依赖 ANSI） |
 | 时间 / 日期 | `chrono`（local tz + `NaiveDate` 桶键） |
 | JSONL 并行读取 | `rayon`（fold + reduce） |
@@ -148,7 +170,7 @@ Horologium 对标 `~/.claude/statusline.sh` 的行为，在下列条件下保证
 cargo run -- status < test-fixtures/sample.json    # 本地跑
 cargo test                                         # 跑单测
 cargo clippy -- -D warnings                        # 静态检查
-cargo fmt --check                                  # 格式
+cargo fmt -- --check                               # 格式
 ```
 
 ## 与原版的关系

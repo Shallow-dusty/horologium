@@ -28,6 +28,7 @@ FIXTURES="$SCRIPT_DIR/fixtures"
 SNAPSHOTS="$SCRIPT_DIR/snapshots"
 RUNTIME_REPO="$SCRIPT_DIR/runtime-gitrepo"
 HOROLOGIUM="${HOROLOGIUM:-horologium}"
+HOROLOGIUM_CONFIG="${HOROLOGIUM_CONFIG:-/dev/null}"
 BASH_STATUSLINE="${BASH_STATUSLINE:-$HOME/.backups/claude/statusline.sh.bash-v1.20260423.bak}"
 
 mode="check"
@@ -83,7 +84,7 @@ render_one() {
     # $RUNTIME_REPO is built from $SCRIPT_DIR, which is realpath'd; it
     # won't contain `|`, so using `|` as the sed delimiter is safe.
     sed "s|__STUB_GIT_REPO__|$RUNTIME_REPO|g" "$fixture" \
-        | "$HOROLOGIUM" status "${args[@]}"
+        | HOROLOGIUM_CONFIG="$HOROLOGIUM_CONFIG" "$HOROLOGIUM" status "${args[@]}"
 }
 
 # Print a diff block with two-space indentation without `diff | sed`
@@ -154,7 +155,7 @@ if (( vs_bash == 1 )); then
         name=$(basename "$fixture" .json)
         # Substitute placeholder once; both runners consume the same payload.
         payload=$(sed "s|__STUB_GIT_REPO__|$RUNTIME_REPO|g" "$fixture")
-        if ! h=$(printf '%s' "$payload" | "$HOROLOGIUM" status); then
+        if ! h=$(printf '%s' "$payload" | HOROLOGIUM_CONFIG="$HOROLOGIUM_CONFIG" "$HOROLOGIUM" status); then
             echo "--- $name --- (horologium errored)"; continue
         fi
         b=$(printf '%s' "$payload" | "$BASH_STATUSLINE" 2>/dev/null || echo "[bash execution failed]")

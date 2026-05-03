@@ -99,18 +99,7 @@ struct Segment {
     link: Option<String>,
 }
 
-// Fixed color pairs for powerline segments (xterm-256 indices).
-// Tuned for legibility on both dark and light terminal themes.
-const PL_MODEL_BG: u8 = 24; // deep blue
-const PL_MODEL_FG: u8 = 15; // bright white
-const PL_DIR_BG: u8 = 31; // steel blue
-const PL_DIR_FG: u8 = 15;
-const PL_BRANCH_BG: u8 = 22; // dark green
-const PL_BRANCH_FG: u8 = 15;
-const PL_CTX_BG: u8 = 237; // dark gray
-const PL_CTX_FG: u8 = 15;
-const PL_COST_BG: u8 = 90; // muted purple
-const PL_COST_FG: u8 = 15;
+use crate::config::{self, Config, SegmentName, ThresholdConfig};
 
 const ARROW: char = '\u{e0b0}';
 
@@ -125,25 +114,55 @@ pub fn run(args: StatusArgs) -> Result<()> {
         eprintln!("Try `horologium stat daily` for interactive usage analytics.");
         std::process::exit(0);
     }
+
+    let mut cfg = load_config_for_status();
+    if args.powerline {
+        cfg.render.powerline = true;
+    }
+    if args.multiline {
+        cfg.render.multiline = true;
+    }
+    if args.hyperlinks {
+        cfg.render.hyperlinks = true;
+    }
+
     let mut buf = String::new();
     std::io::stdin()
         .read_to_string(&mut buf)
         .context("read stdin")?;
     let data: Input = serde_json::from_str(&buf).context("parse stdin JSON")?;
 
-    let segments = build_segments(&data, args.hyperlinks);
+    let segments = build_segments(&data, &cfg);
 
     let opts = RenderOpts {
-        powerline: args.powerline,
-        hyperlinks: args.hyperlinks,
+        powerline: cfg.render.powerline,
+        hyperlinks: cfg.render.hyperlinks,
     };
-    let output = if args.multiline {
+    let output = if cfg.render.multiline {
         render_multiline(&segments, &opts)
     } else {
         render_row(&segments, &opts)
     };
     println!("{}", output);
     Ok(())
+}
+
+fn load_config_for_status() -> Config {
+    match config::load_default_path() {
+        Ok(cfg) => {
+            for issue in config::validate(&cfg) {
+                eprintln!("warning: horologium config issue: {}", issue);
+            }
+            cfg
+        }
+        Err(err) => {
+            eprintln!(
+                "warning: failed to load horologium config: {:#}; using defaults",
+                err
+            );
+            Config::default()
+        }
+    }
 }
 
 struct RenderOpts {
@@ -181,92 +200,86 @@ fn max_row(segs: &[Segment]) -> u8 {
     segs.iter().map(|s| s.row).max().unwrap_or(0)
 }
 
-fn build_segments(data: &Input, hyperlinks: bool) -> Vec<Segment> {
-    // Row layout for --multiline:
-    //   row 0 = identity (model / dir / branch)
-    //   row 1 = usage    (ctx% / cost / 5h / 7d)
-    const ROW_IDENTITY: u8 = 0;
-    const ROW_USAGE: u8 = 1;
+fn build_segments(data: &Input, cfg: &Config) -> Vec<Segment> {
+    let hyperlinks = cfg.render.hyperlinks;
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64;
+    let has_rate_gate = data
+        .rate_limits
+        .as_ref()
+        .is_some_and(|rl| rl.five_hour.is_some());
 
     let mut segs: Vec<Segment> = Vec::new();
 
-    if let Some(name) = data.model.display_name.as_deref() {
-        segs.push(Segment::fixed(
-            name.to_string(),
-            PL_MODEL_BG,
-            PL_MODEL_FG,
-            ROW_IDENTITY,
-        ));
-    }
-    if let Some(dir) = data.workspace.current_dir.as_deref() {
-        // Skip link synthesis + git config IO when hyperlinks are off — this
-        // keeps the cold-start path free of `.git/config` reads in the
-        // default `horologium status` invocation.
-        let dir_link = if hyperlinks {
-            Some(format!("file://{}", encode_path_for_url(dir)))
-        } else {
-            None
-        };
-        segs.push(
-            Segment::fixed(
-                basename(dir).to_string(),
-                PL_DIR_BG,
-                PL_DIR_FG,
-                ROW_IDENTITY,
-            )
-            .with_link(dir_link),
-        );
-        // Mirror bash `git branch --show-current 2>/dev/null`: emit branch
-        // only when attached to a local branch; detached HEAD / non-git dir
-        // yields nothing.
-        if let Some(branch) = crate::git::current_branch(Path::new(dir)) {
-            let branch_link = if hyperlinks {
-                crate::git::origin_web_url(Path::new(dir))
-            } else {
-                None
-            };
-            segs.push(
-                Segment::fixed(branch, PL_BRANCH_BG, PL_BRANCH_FG, ROW_IDENTITY)
-                    .with_link(branch_link),
-            );
-        }
-    }
+    for seg_cfg in &cfg.segments {
+        let row = seg_cfg.resolved_row();
+        let bg = seg_cfg.resolved_bg();
+        let fg = seg_cfg.resolved_fg();
 
-    // Context % and cost are ALWAYS rendered; absent values default to 0
-    // (bash parity: `jq ... // 0` + `printf '$%.2f'` with 0 fallback).
-    // Note: bash `cut -d. -f1` truncates decimals, so `as i64` matches.
-    let pct = data.context_window.used_percentage.unwrap_or(0.0);
-    segs.push(Segment::fixed(
-        format!("{}%", pct as i64),
-        PL_CTX_BG,
-        PL_CTX_FG,
-        ROW_USAGE,
-    ));
-
-    let cost = data.cost.total_cost_usd.unwrap_or(0.0);
-    segs.push(Segment::fixed(
-        format!("${:.2}", cost),
-        PL_COST_BG,
-        PL_COST_FG,
-        ROW_USAGE,
-    ));
-
-    // Rate limit block is gated on `five_hour` presence (bash: `[ -n "$RATE_5H" ]`).
-    // When gate passes, both 5h and 7d segments emit, with 7d defaulting to 0%
-    // (no countdown) if seven_day is absent.
-    if let Some(rl) = data.rate_limits.as_ref() {
-        if let Some(five_hour) = rl.five_hour.as_ref() {
-            let now = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs() as i64;
-            segs.push(build_rate_segment("5h", Some(five_hour), now, ROW_USAGE));
-            segs.push(build_rate_segment(
-                "7d",
-                rl.seven_day.as_ref(),
-                now,
-                ROW_USAGE,
-            ));
+        match seg_cfg.name {
+            SegmentName::Model => {
+                if let Some(name) = data.model.display_name.as_deref() {
+                    segs.push(Segment::fixed(name.to_string(), bg, fg, row));
+                }
+            }
+            SegmentName::Dir => {
+                if let Some(dir) = data.workspace.current_dir.as_deref() {
+                    let dir_link = if hyperlinks {
+                        Some(format!("file://{}", encode_path_for_url(dir)))
+                    } else {
+                        None
+                    };
+                    segs.push(
+                        Segment::fixed(basename(dir).to_string(), bg, fg, row).with_link(dir_link),
+                    );
+                }
+            }
+            SegmentName::Branch => {
+                if let Some(dir) = data.workspace.current_dir.as_deref() {
+                    if let Some(branch) = crate::git::current_branch(Path::new(dir)) {
+                        let branch_link = if hyperlinks {
+                            crate::git::origin_web_url(Path::new(dir))
+                        } else {
+                            None
+                        };
+                        segs.push(Segment::fixed(branch, bg, fg, row).with_link(branch_link));
+                    }
+                }
+            }
+            SegmentName::Context => {
+                let pct = data.context_window.used_percentage.unwrap_or(0.0);
+                segs.push(Segment::fixed(format!("{}%", pct as i64), bg, fg, row));
+            }
+            SegmentName::Cost => {
+                let cost = data.cost.total_cost_usd.unwrap_or(0.0);
+                segs.push(Segment::fixed(format!("${:.2}", cost), bg, fg, row));
+            }
+            SegmentName::Rate5h => {
+                if has_rate_gate {
+                    let rl = data.rate_limits.as_ref().unwrap();
+                    segs.push(build_rate_segment(
+                        "5h",
+                        rl.five_hour.as_ref(),
+                        now,
+                        row,
+                        &cfg.thresholds,
+                    ));
+                }
+            }
+            SegmentName::Rate7d => {
+                if has_rate_gate {
+                    let rl = data.rate_limits.as_ref().unwrap();
+                    segs.push(build_rate_segment(
+                        "7d",
+                        rl.seven_day.as_ref(),
+                        now,
+                        row,
+                        &cfg.thresholds,
+                    ));
+                }
+            }
         }
     }
 
@@ -286,10 +299,9 @@ impl Segment {
         }
     }
 
-    /// Segment colored by threshold (used for rate_limits 5h/7d).
-    fn threshold(text: String, pct: i64, row: u8) -> Self {
-        let plain = colorize_plain(pct, &text);
-        let (pl_fg, pl_bg) = powerline_rate_colors(pct);
+    fn threshold(text: String, pct: i64, row: u8, t: &ThresholdConfig) -> Self {
+        let plain = colorize_plain(pct, &text, t);
+        let (pl_fg, pl_bg) = powerline_rate_colors(pct, t);
         Self {
             text,
             plain,
@@ -307,40 +319,40 @@ impl Segment {
     }
 }
 
-fn build_rate_segment(label: &str, w: Option<&Window>, now: i64, row: u8) -> Segment {
+fn build_rate_segment(
+    label: &str,
+    w: Option<&Window>,
+    now: i64,
+    row: u8,
+    thresholds: &ThresholdConfig,
+) -> Segment {
     let (pct, resets_at) = match w {
         Some(w) => (w.used_percentage.unwrap_or(0.0), w.resets_at),
         None => (0.0, None),
     };
-    // Bash `printf '%.0f'` uses banker's rounding on glibc (IEEE 754 round-to-even):
-    // 70.5 → 70, 90.5 → 90, 71.5 → 72. Matched exactly by f64::round_ties_even
-    // (stable in Rust 1.77+). Prior versions used .round() which is
-    // half-away-from-zero and would give 90.5 → 91, crossing the yellow→red
-    // threshold at a value bash renders as yellow.
+    // Bash `printf '%.0f'` uses banker's rounding on glibc (IEEE 754 round-to-even).
     let pct_i = pct.round_ties_even() as i64;
     let mut body = format!("{}:{}%", label, pct_i);
     if let Some(reset_at) = resets_at {
         body.push_str(&format!("⏳{}", fmt_countdown(reset_at - now)));
     }
-    Segment::threshold(body, pct_i, row)
+    Segment::threshold(body, pct_i, row, thresholds)
 }
 
-fn colorize_plain(pct: i64, s: &str) -> String {
-    if pct >= 90 {
+fn colorize_plain(pct: i64, s: &str, t: &ThresholdConfig) -> String {
+    if pct >= t.red_above {
         s.red().to_string()
-    } else if pct >= 70 {
+    } else if pct >= t.green_below {
         s.yellow().to_string()
     } else {
         s.green().to_string()
     }
 }
 
-/// Threshold → (fg, bg) pair for powerline rate segments. Mirrors the
-/// plain-mode color choice: green (<70), yellow/orange (70-89), red (>=90).
-fn powerline_rate_colors(pct: i64) -> (u8, u8) {
-    if pct >= 90 {
+fn powerline_rate_colors(pct: i64, t: &ThresholdConfig) -> (u8, u8) {
+    if pct >= t.red_above {
         (15, 52) // white on dark red
-    } else if pct >= 70 {
+    } else if pct >= t.green_below {
         (16, 214) // black on orange
     } else {
         (15, 22) // white on dark green
@@ -433,6 +445,19 @@ fn basename(p: &str) -> &str {
 mod tests {
     use super::*;
 
+    fn default_thresholds() -> ThresholdConfig {
+        ThresholdConfig::default()
+    }
+
+    fn segment_cfg(name: SegmentName) -> crate::config::SegmentConfig {
+        crate::config::SegmentConfig {
+            name,
+            bg: None,
+            fg: None,
+            row: None,
+        }
+    }
+
     #[test]
     fn countdown_formats() {
         assert_eq!(fmt_countdown(0), "reset");
@@ -460,7 +485,7 @@ mod tests {
             used_percentage: Some(89.7),
             resets_at: None,
         };
-        let s = build_rate_segment("5h", Some(&w), 0, 1);
+        let s = build_rate_segment("5h", Some(&w), 0, 1, &default_thresholds());
         assert!(
             s.text.contains("5h:90%"),
             "expected 90% (rounded), got: {}",
@@ -483,7 +508,7 @@ mod tests {
                 used_percentage: Some(input),
                 resets_at: None,
             };
-            let s = build_rate_segment("5h", Some(&w), 0, 1);
+            let s = build_rate_segment("5h", Some(&w), 0, 1, &default_thresholds());
             assert!(
                 s.text.contains(expected),
                 "for {}, expected '{}' in text but got '{}'",
@@ -496,7 +521,7 @@ mod tests {
 
     #[test]
     fn rate_missing_window_defaults_to_zero() {
-        let s = build_rate_segment("7d", None, 0, 1);
+        let s = build_rate_segment("7d", None, 0, 1, &default_thresholds());
         assert!(s.text.contains("7d:0%"), "expected 7d:0%, got: {}", s.text);
         assert!(
             !s.text.contains("⏳"),
@@ -511,7 +536,7 @@ mod tests {
             used_percentage: Some(50.0),
             resets_at: None,
         };
-        let s = build_rate_segment("5h", Some(&w), 0, 1);
+        let s = build_rate_segment("5h", Some(&w), 0, 1, &default_thresholds());
         assert!(s.text.contains("5h:50%"));
         assert!(!s.text.contains("⏳"));
     }
@@ -520,9 +545,10 @@ mod tests {
     fn plain_color_thresholds() {
         // Thresholds: <70 green, 70-89 yellow, >=90 red. Just verify distinct
         // color codes are emitted in plain mode.
-        let g = colorize_plain(50, "x");
-        let y = colorize_plain(75, "x");
-        let r = colorize_plain(95, "x");
+        let t = default_thresholds();
+        let g = colorize_plain(50, "x", &t);
+        let y = colorize_plain(75, "x", &t);
+        let r = colorize_plain(95, "x", &t);
         assert_ne!(g, y);
         assert_ne!(y, r);
         assert_ne!(g, r);
@@ -531,9 +557,51 @@ mod tests {
     #[test]
     fn powerline_rate_colors_follow_thresholds() {
         // Same thresholds as plain mode, different palette (bg-centric).
-        assert_ne!(powerline_rate_colors(50), powerline_rate_colors(75));
-        assert_ne!(powerline_rate_colors(75), powerline_rate_colors(95));
-        assert_ne!(powerline_rate_colors(50), powerline_rate_colors(95));
+        let t = default_thresholds();
+        assert_ne!(powerline_rate_colors(50, &t), powerline_rate_colors(75, &t));
+        assert_ne!(powerline_rate_colors(75, &t), powerline_rate_colors(95, &t));
+        assert_ne!(powerline_rate_colors(50, &t), powerline_rate_colors(95, &t));
+    }
+
+    #[test]
+    fn build_segments_follows_config_order_and_hidden_segments() {
+        let data = Input {
+            model: Model {
+                display_name: Some("Opus".into()),
+            },
+            context_window: ContextWindow {
+                used_percentage: Some(42.0),
+            },
+            cost: Cost {
+                total_cost_usd: Some(1.23),
+            },
+            ..Default::default()
+        };
+        let cfg = Config {
+            segments: vec![
+                segment_cfg(SegmentName::Cost),
+                segment_cfg(SegmentName::Model),
+            ],
+            ..Default::default()
+        };
+
+        let segs = build_segments(&data, &cfg);
+        let texts = segs.iter().map(|s| s.text.as_str()).collect::<Vec<_>>();
+        assert_eq!(texts, vec!["$1.23", "Opus"]);
+    }
+
+    #[test]
+    fn custom_thresholds_drive_rate_segment_colors() {
+        let default = default_thresholds();
+        let custom = ThresholdConfig {
+            green_below: 50,
+            red_above: 80,
+        };
+
+        assert_ne!(
+            powerline_rate_colors(65, &default),
+            powerline_rate_colors(65, &custom)
+        );
     }
 
     #[test]

@@ -55,6 +55,15 @@ Horologium 的 `stat daily` 子命令直接读本地的 `~/.claude/projects/**/*
 
 **性能**：本机 665 文件 / 517 MB / 14 天历史 → **58 毫秒**（rayon 8 核 7.4× 并行）
 
+### `horologium configure`
+
+管理 `~/.config/horologium/config.toml`。当前是 TOML 配置 MVP：
+
+- `configure init` 生成默认配置
+- `configure check` 校验阈值、重复 segment、空 segment 列表
+- `configure path` 打印配置路径
+- `status` 自动读取配置；CLI flag 可临时覆盖渲染开关
+
 ---
 
 ## 它的技术承诺
@@ -81,12 +90,12 @@ Horologium 的 `stat daily` 子命令直接读本地的 `~/.claude/projects/**/*
 
 - **不做 MCP server 形态**：ccusage 有 `@ccusage/mcp`，Horologium 不做（MCP 不是热路径，Node 的成本可以接受）
 - **不上云 / 不上传日志**：纯本地
-- **不适配非 Claude Code 的 CLI**（codex / amp / opencode）：保持单一 scope
+- **当前版本仍只适配 Claude Code**：Codex 兼容性会单独开分支推进，避免和配置改动混在一起
 
 ---
 
 ## 接下来
 
 - 想直接跑起来 → 看 [README.md 的快速开始](../README.md#快速开始)
-- 想看完整命令参考 → `horologium status --help` / `horologium stat daily --help`
+- 想看完整命令参考 → `horologium status --help` / `horologium stat daily --help` / `horologium configure --help`
 - 想知道为什么这样设计 / 下一步做什么 → [`docs/roadmap.md`](roadmap.md)

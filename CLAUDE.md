@@ -16,7 +16,7 @@ Claude Code 状态栏与用量解析的统一 Rust CLI。
 - `--multiline`：身份行 + 用量行分开
 - `--hyperlinks`：dir / branch 段 OSC 8 可点击
 
-全功能模式冷启动 <1 ms（bash 35 ms → **45× 提速**）。109 个单元测试（含 worktree / IO 集成测试）。release 依赖为 clap / serde / serde_json / anyhow / owo-colors / chrono / rayon；`tempfile` 仅作 dev-dependency。git 走手写 `.git/HEAD` + `commondir` 解析（worktree-aware），OSC 8 / 256 色 / percent-encoding 全手写 ANSI。
+全功能模式冷启动 <1 ms（bash 35 ms → **45× 提速**）。125 个单元测试（含 worktree / IO 集成测试）。release 依赖为 clap / serde / serde_json / anyhow / owo-colors / chrono / rayon / toml；`tempfile` 仅作 dev-dependency。git 走手写 `.git/HEAD` + `commondir` 解析（worktree-aware），OSC 8 / 256 色 / percent-encoding 全手写 ANSI。
 
 v1.1 修了 v1.0 审出来的 7 项：bash banker's rounding parity、worktree origin_web_url、ssh:// 多变体归一化、URL percent-encoding、hyperlinks 关闭时 IO 短路、IO 级测试覆盖、README 文档口径。详见 `docs/roadmap.md` 决策日志。
 
@@ -24,9 +24,11 @@ v1.1 修了 v1.0 审出来的 7 项：bash banker's rounding parity、worktree o
 
 2026-04-23：**Phase 2 `stat daily` MVP 完成**。填补 Max 订阅历史统计空白（官方 `/usage` TUI 仅覆盖当前会话）。跨会话 / 按日聚合，支持 `--since / --until / --project / --json / --root`，按 `message.id` 跨文件 dedup。定价表用 LiteLLM 快照嵌入 + `scripts/gen-pricing.py` 发版时 regen。本机 665 文件 / 517 MB / 14 天历史在 8 核上 ~60 ms 出结果。
 
-2026-04-25：**Phase 2 v2.1.0 完成**。新增 `stat session`（按会话聚合，session 级过滤，`--sort-cost`）和 `stat blocks`（5h 固定窗口聚合，对齐 rate limit 节奏）。Codex 审核后修正 session 过滤语义（session 级而非 record 级）。109 个单元测试。
+2026-04-25：**Phase 2 v2.1.0 完成**。新增 `stat session`（按会话聚合，session 级过滤，`--sort-cost`）和 `stat blocks`（5h 固定窗口聚合，对齐 rate limit 节奏）。Codex 审核后修正 session 过滤语义（session 级而非 record 级）。
 
-下一步：Phase 3 `configure` 或 Phase 4 发布工程（cargo-dist / 多平台产物）。
+2026-05-03：**Phase 3 `configure` TOML MVP 完成**。新增 `~/.config/horologium/config.toml` 持久配置，`configure init/check/path`，支持 render 开关、segment 顺序/隐藏、row、Powerline 256 色和 rate threshold。坏配置由 `status` stderr 告警并回退默认；parity harness 通过 `HOROLOGIUM_CONFIG=/dev/null` 保持确定性。
+
+下一步：在干净工作区上开 Codex 兼容性分支。
 
 ## 目录结构
 
@@ -42,7 +44,7 @@ src/
 │   ├── pricing.rs    # 嵌入 LiteLLM 快照 + cost 算法
 │   ├── aggregate.rs  # rayon fold + 跨文件 id dedup + 日桶
 │   └── format.rs     # table + NDJSON
-└── config.rs     # Phase 3: TUI 配置器（未建）
+└── config.rs     # Phase 3: TOML 配置与 configure CLI
 data/
 └── litellm-anthropic-pricing.json  # 定价源（gen-pricing.py regen）
 scripts/
@@ -72,6 +74,6 @@ tests/parity/
 
 ## 未完事项备忘
 
-- 已发布版本：v1.0.0 / v1.1.0（Phase 1）与 v2.0.0 / v2.0.1 / v2.0.2（Phase 2 `stat daily` MVP + pricing patch）均已 push 至 `origin/main` 并建 GitHub Release
+- 已发布版本：v1.0.0 / v1.1.0（Phase 1）与 v2.0.0 / v2.0.1 / v2.0.2 / v2.1.0（Phase 2）均已 push 至 `origin/main` 并建 GitHub Release
 - 2 周 dogfooding 观测期进行中（起始 2026-04-23），观察 `horologium status` 作为 statusLine 的稳定性；有问题随时回退到 `~/.backups/claude/statusline.sh.bash-v1.20260423.bak`
-- `stat session` / `stat blocks` 已完成（v2.1.0）；Phase 3 `configure` 未启动
+- `configure` TOML MVP 已完成；ratatui TUI、写入 `~/.claude/settings.json` 和 git-status widget 后续再评估

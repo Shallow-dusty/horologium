@@ -1,6 +1,7 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 
+mod config;
 mod git;
 mod stat;
 mod status;
@@ -24,8 +25,10 @@ enum Command {
     ///
     /// Example: horologium stat daily --since 2026-04-20
     Stat(stat::StatArgs),
-    /// Interactive TUI configurator (not yet implemented)
-    Configure,
+    /// Manage statusline configuration
+    ///
+    /// Example: horologium configure init
+    Configure(config::ConfigureArgs),
 }
 
 fn main() -> Result<()> {
@@ -33,9 +36,6 @@ fn main() -> Result<()> {
     match cli.command {
         Command::Status(args) => status::run(args),
         Command::Stat(args) => stat::run(args),
-        Command::Configure => {
-            eprintln!("configure: not implemented yet (phase 3)");
-            Ok(())
-        }
+        Command::Configure(args) => config::run(args),
     }
 }

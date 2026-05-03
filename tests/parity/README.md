@@ -42,6 +42,8 @@ tests/parity/run.sh --vs-bash    # also diff against the bash statusline
 Env vars:
 
 - `HOROLOGIUM` — override the binary path (default: `horologium` on PATH)
+- `HOROLOGIUM_CONFIG` — override the status config path (default: `/dev/null`
+  so snapshots do not depend on the user's real config)
 - `BASH_STATUSLINE` — path to the legacy `statusline.sh` backup
   (default: `~/.backups/claude/statusline.sh.bash-v1.20260423.bak`)
 
