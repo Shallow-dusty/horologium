@@ -79,6 +79,14 @@ Codex CLI 自身的 TUI 状态栏使用官方 `/statusline` / `[tui].status_line
 内置状态项，不支持 Claude Code 的 external command statusLine 协议；因此 Horologium
 不会承诺把自定义行嵌入 Codex 底部状态栏。
 
+因此 Codex 方向只保留三类主线能力：
+
+- 官方显示配置辅助：`configure codex-statusline` 输出推荐的 Codex 原生状态栏配置。
+- 外部状态显示：`status --source codex` 解析 session JSONL，再用 Horologium 自己的渲染器输出。
+- 数据统计：`stat daily/session/blocks --source codex` 聚合 Codex 本地日志。
+
+MCP 不属于这个目标；hooks 也不作为状态栏方案。后续只有在需要补充事件采集证据时，才单独评估 hooks。
+
 ---
 
 ## 它的技术承诺
@@ -103,7 +111,9 @@ Codex CLI 自身的 TUI 状态栏使用官方 `/statusline` / `[tui].status_line
 
 ## 它不做什么
 
-- **不做 MCP server 形态**：ccusage 有 `@ccusage/mcp`，Horologium 不做（MCP 不是热路径，Node 的成本可以接受）
+- **不做 Codex TUI 注入**：官方开放外部 statusline 接口前，不承诺嵌入 Codex 底部状态栏
+- **不做 MCP server 形态**：当前目标是本地状态显示和数据统计，不扩展成 MCP 服务
+- **不把 hooks 当作状态栏方案**：hooks 只可能作为后续事件采集入口，当前不进入主线
 - **不上云 / 不上传日志**：纯本地
 - **Gemini / Amp / OpenCode 尚未适配**：当前多源支持覆盖 Claude Code 与 Codex
 

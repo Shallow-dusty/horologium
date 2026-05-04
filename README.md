@@ -106,6 +106,13 @@ Codex CLI 的 TUI 状态栏请使用官方原生 `/statusline` 或 `[tui].status
 所以 `horologium status --source codex` 适合调试/外部渲染 session JSONL，不会被
 Codex TUI 自动调用。
 
+Horologium 对 Codex 的定位是状态显示与数据统计：
+
+- 状态显示：读取 Codex session JSONL 后，用 Horologium 自己的 segment / Powerline / multiline / hyperlink 渲染外部状态行。
+- 数据统计：聚合 `~/.codex/sessions/**/*.jsonl`，输出 daily / session / blocks 视图。
+- 官方配置辅助：只生成 Codex 原生显示配置建议，例如 `[tui].status_line` 推荐片段。
+- 非目标：不把 Horologium 注入 Codex TUI；不把 MCP 或 hooks 当作状态栏兼容方案。
+
 ## `configure`
 
 默认配置文件路径：`~/.config/horologium/config.toml`。

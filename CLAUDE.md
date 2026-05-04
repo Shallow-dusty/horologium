@@ -28,7 +28,7 @@ v1.1 修了 v1.0 审出来的 7 项：bash banker's rounding parity、worktree o
 
 2026-05-03：**Phase 3 `configure` TOML MVP 完成**。新增 `~/.config/horologium/config.toml` 持久配置，`configure init/check/path`，支持 render 开关、segment 顺序/隐藏、row、Powerline 256 色和 rate threshold。坏配置由 `status` stderr 告警并回退默认；parity harness 通过 `HOROLOGIUM_CONFIG=/dev/null` 保持确定性。
 
-2026-05-03：**Phase 5 Codex 兼容 MVP 完成**。新增 `--source codex`，`status` 可读取 Codex session JSONL 并折叠 `turn_context` + `token_count`；`stat daily/session/blocks` 默认扫描 `~/.codex/sessions`。OpenAI/Codex 模型内置 GPT-5.5 / GPT-5.4 / GPT-5.4 mini / GPT-5.3-Codex / GPT-5.2 费率。Codex TUI 状态栏使用官方原生 `/statusline` / `[tui].status_line`；Horologium 提供 `configure codex-statusline` 输出推荐配置，不承诺 external command 嵌入。
+2026-05-03：**Phase 5 Codex 兼容 MVP 完成**。新增 `--source codex`，`status` 可读取 Codex session JSONL 并折叠 `turn_context` + `token_count`；`stat daily/session/blocks` 默认扫描 `~/.codex/sessions`。OpenAI/Codex 模型内置 GPT-5.5 / GPT-5.4 / GPT-5.4 mini / GPT-5.3-Codex / GPT-5.2 费率。Codex TUI 状态栏使用官方原生 `/statusline` / `[tui].status_line`；Horologium 提供 `configure codex-statusline` 输出推荐配置，不承诺 external command 嵌入。后续讨论 Codex 配置时，只把 `tui.status_line`、`tui.terminal_title`、session/log 路径、token/context/rate-limit 字段列为主线；MCP 不相关，hooks 只可能作为未来事件采集入口，不是状态栏方案。
 
 下一步：补充发布工程或继续 Gemini source。
 

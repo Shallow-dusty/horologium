@@ -97,6 +97,14 @@ TOML + `configure check` 足够，TUI 不作为当前兼容性工作的前置条
 
 **目标**：将 Horologium 从 Claude Code 专属工具扩展为跨 Agent CLI 的统一状态栏 + 用量分析工具。
 
+当前项目状态：
+
+- 已完成 Codex 兼容 MVP：`status`、`stat daily`、`stat session`、`stat blocks` 均支持 `--source codex`。
+- Codex 数据来源限定为本地 `~/.codex/sessions/**/*.jsonl`，核心口径是 `turn_context` 与 `token_count.last_token_usage`。
+- Codex 状态显示分两层：Codex TUI 内部使用官方原生 `/statusline` / `[tui].status_line`；Horologium 只做外部渲染和报告。
+- `configure codex-statusline` 是配置辅助，不是 external command hook，也不会让 Codex TUI 调用 Horologium。
+- 下一步回到官方配置面梳理时，只看与状态显示/统计直接相关的配置：`tui.status_line`、`tui.terminal_title`、session/log 路径、token/context/rate-limit 字段。
+
 | 里程碑 | 状态 |
 |---|---|
 | `status --source codex`：适配 Codex session JSONL | ✅ 2026-05-03：折叠 `turn_context` + `token_count`，用于调试/外部渲染；Codex TUI 仍使用官方原生 status line |
@@ -128,7 +136,9 @@ Codex 兼容性的前置条件。
 
 ## 非目标（明确不做）
 
-- MCP server 形态：ccusage 有 `@ccusage/mcp`，Horologium 不做。MCP 不是热路径，走 Node 的成本可以接受。
+- Codex TUI 注入：官方开放外部 statusline 接口前，不做 `Codex -> horologium status` 这种嵌入式调用。
+- MCP server 形态：当前产品边界是状态显示与本地统计，不扩展成 MCP 服务。
+- hooks 状态栏方案：hooks 不能解决 Codex TUI statusline 嵌入；仅在未来需要额外事件采集时单独评估。
 - 日志上传 / 云端同步：本工具纯本地。
 
 ## 决策日志
