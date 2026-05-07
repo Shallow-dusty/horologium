@@ -13,6 +13,22 @@ use serde::Deserialize;
 
 use crate::source::Source;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ServiceTier {
+    Standard,
+    Fast,
+}
+
+impl ServiceTier {
+    pub fn parse(s: &str) -> Option<Self> {
+        match s.to_ascii_lowercase().as_str() {
+            "standard" => Some(Self::Standard),
+            "fast" => Some(Self::Fast),
+            _ => None,
+        }
+    }
+}
+
 /// Single `assistant`-type record with the fields needed for costing.
 #[derive(Debug, Clone)]
 pub struct Record {
@@ -25,6 +41,7 @@ pub struct Record {
     pub cache_creation_1h_tokens: u64,
     pub cache_read_tokens: u64,
     pub cwd: Option<String>,
+    pub service_tier: Option<ServiceTier>,
 }
 
 // Raw structs mirror the JSONL layout exactly. All fields optional so a
@@ -57,6 +74,7 @@ struct RawUsage {
     #[serde(default)]
     cache_read_input_tokens: u64,
     cache_creation: Option<RawCacheCreation>,
+    service_tier: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -77,6 +95,7 @@ struct CodexContext {
     turn_id: Option<String>,
     model: Option<String>,
     cwd: Option<String>,
+    service_tier: Option<ServiceTier>,
 }
 
 #[derive(Deserialize)]
@@ -92,6 +111,7 @@ struct CodexTurnContext {
     turn_id: Option<String>,
     cwd: Option<String>,
     model: Option<String>,
+    service_tier: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -100,6 +120,8 @@ struct CodexTokenCount {
     last_token_usage: Option<CodexUsage>,
     #[serde(default)]
     total_token_usage: Option<CodexUsage>,
+    #[serde(default)]
+    service_tier: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -144,6 +166,9 @@ impl ParserState {
                 if ctx.model.is_some() {
                     self.codex_context.model = ctx.model;
                 }
+                if let Some(tier) = ctx.service_tier.as_deref().and_then(ServiceTier::parse) {
+                    self.codex_context.service_tier = Some(tier);
+                }
                 Ok(None)
             }
             Some("event_msg") => {
@@ -187,6 +212,11 @@ impl ParserState {
                     .as_deref()
                     .unwrap_or("unknown-turn");
                 let uncached_input = usage.input_tokens.saturating_sub(usage.cached_input_tokens);
+                let service_tier = count
+                    .service_tier
+                    .as_deref()
+                    .and_then(ServiceTier::parse)
+                    .or(self.codex_context.service_tier);
 
                 Ok(Some(Record {
                     timestamp,
@@ -201,6 +231,7 @@ impl ParserState {
                     cache_creation_1h_tokens: 0,
                     cache_read_tokens: usage.cached_input_tokens,
                     cwd: self.codex_context.cwd.clone(),
+                    service_tier,
                 }))
             }
             _ => Ok(None),
@@ -274,6 +305,7 @@ fn parse_claude_line(line: &str) -> Result<Option<Record>> {
         cache_creation_1h_tokens: cc_1h,
         cache_read_tokens: usage.cache_read_input_tokens,
         cwd: raw.cwd,
+        service_tier: usage.service_tier.as_deref().and_then(ServiceTier::parse),
     }))
 }
 
@@ -293,6 +325,7 @@ mod tests {
         assert_eq!(r.cache_creation_5m_tokens, 33627);
         assert_eq!(r.cache_creation_1h_tokens, 0);
         assert_eq!(r.cache_read_tokens, 0);
+        assert_eq!(r.service_tier, Some(ServiceTier::Standard));
         assert_eq!(
             r.cwd.as_deref(),
             Some("/home/shallow/04.AI-Prism/00.Agent-CLI")
@@ -377,7 +410,20 @@ mod tests {
         assert_eq!(r.input_tokens, 750);
         assert_eq!(r.cache_read_tokens, 250);
         assert_eq!(r.output_tokens, 125);
+        assert_eq!(r.service_tier, None);
         assert!(r.message_id.contains("turn_1"));
+    }
+
+    #[test]
+    fn codex_parser_reads_service_tier_from_token_count() {
+        let mut parser = ParserState::new(Source::Codex);
+        let ctx = r#"{"timestamp":"2026-05-03T09:00:00Z","type":"turn_context","payload":{"turn_id":"turn_1","cwd":"/work/project","model":"gpt-5.5"}}"#;
+        assert!(parser.parse_line(ctx).unwrap().is_none());
+
+        let count = r#"{"timestamp":"2026-05-03T09:00:05Z","type":"event_msg","payload":{"type":"token_count","info":{"service_tier":"fast","last_token_usage":{"input_tokens":1000,"cached_input_tokens":250,"output_tokens":125,"total_tokens":1125},"model_context_window":258400}}}"#;
+        let r = parser.parse_line(count).unwrap().unwrap();
+
+        assert_eq!(r.service_tier, Some(ServiceTier::Fast));
     }
 
     #[test]

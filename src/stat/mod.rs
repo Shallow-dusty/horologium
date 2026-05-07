@@ -15,10 +15,11 @@
 
 use anyhow::{anyhow, Result};
 use chrono::NaiveDate;
-use clap::{Args, Subcommand};
+use clap::{Args, Subcommand, ValueEnum};
 use std::path::PathBuf;
 
 use crate::source::Source;
+use record::ServiceTier;
 
 mod aggregate;
 mod format;
@@ -62,6 +63,12 @@ struct BlocksArgs {
     /// Override the logs root (default depends on --source).
     #[arg(long)]
     root: Option<PathBuf>,
+    /// Codex service-tier handling for logs without a tier field.
+    #[arg(long, value_enum, default_value_t = CodexServiceTierArg::Auto)]
+    codex_service_tier: CodexServiceTierArg,
+    /// Multiplier applied to Codex fast-mode cost estimates.
+    #[arg(long, default_value_t = 2.0)]
+    codex_fast_multiplier: f64,
 }
 
 #[derive(Args)]
@@ -87,6 +94,12 @@ struct SessionArgs {
     /// Sort by cost descending (default: chronological).
     #[arg(long)]
     sort_cost: bool,
+    /// Codex service-tier handling for logs without a tier field.
+    #[arg(long, value_enum, default_value_t = CodexServiceTierArg::Auto)]
+    codex_service_tier: CodexServiceTierArg,
+    /// Multiplier applied to Codex fast-mode cost estimates.
+    #[arg(long, default_value_t = 2.0)]
+    codex_fast_multiplier: f64,
 }
 
 #[derive(Args)]
@@ -111,6 +124,22 @@ struct DailyArgs {
     /// Override the logs root (default depends on --source).
     #[arg(long)]
     root: Option<PathBuf>,
+    /// Codex service-tier handling for logs without a tier field.
+    #[arg(long, value_enum, default_value_t = CodexServiceTierArg::Auto)]
+    codex_service_tier: CodexServiceTierArg,
+    /// Multiplier applied to Codex fast-mode cost estimates.
+    #[arg(long, default_value_t = 2.0)]
+    codex_fast_multiplier: f64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
+enum CodexServiceTierArg {
+    /// Read service tier from logs when present; otherwise mark as unknown.
+    Auto,
+    /// Treat all Codex records as standard tier.
+    Standard,
+    /// Treat all Codex records as fast tier.
+    Fast,
 }
 
 pub fn run(args: StatArgs) -> Result<()> {
@@ -124,6 +153,11 @@ pub fn run(args: StatArgs) -> Result<()> {
 fn daily(args: DailyArgs) -> Result<()> {
     let root = resolve_root(args.root.clone(), args.source)?;
     let filters = build_filters(&args)?;
+    let pricing = build_pricing_options(
+        args.source,
+        args.codex_service_tier,
+        args.codex_fast_multiplier,
+    )?;
     let paths = walker::find_jsonl(&root);
 
     // Surface obvious misconfiguration to stderr without blocking output.
@@ -141,7 +175,8 @@ fn daily(args: DailyArgs) -> Result<()> {
         );
     }
 
-    let report = aggregate::aggregate_daily_source(&paths, &filters, args.source);
+    let report =
+        aggregate::aggregate_daily_source_with_pricing(&paths, &filters, args.source, &pricing);
     let out = if args.json {
         format::format_ndjson(&report)
     } else {
@@ -161,6 +196,11 @@ fn daily(args: DailyArgs) -> Result<()> {
 fn session(args: SessionArgs) -> Result<()> {
     let root = resolve_root(args.root.clone(), args.source)?;
     let filters = build_filters_from_session_args(&args)?;
+    let pricing = build_pricing_options(
+        args.source,
+        args.codex_service_tier,
+        args.codex_fast_multiplier,
+    )?;
     let paths = walker::find_jsonl(&root);
 
     if !root.exists() {
@@ -175,7 +215,8 @@ fn session(args: SessionArgs) -> Result<()> {
         );
     }
 
-    let mut report = aggregate::aggregate_sessions_source(&paths, &filters, args.source);
+    let mut report =
+        aggregate::aggregate_sessions_source_with_pricing(&paths, &filters, args.source, &pricing);
     if args.sort_cost {
         report
             .sessions
@@ -225,6 +266,11 @@ fn build_filters_from_session_args(args: &SessionArgs) -> Result<aggregate::Filt
 fn blocks(args: BlocksArgs) -> Result<()> {
     let root = resolve_root(args.root.clone(), args.source)?;
     let filters = build_filters_from_blocks_args(&args)?;
+    let pricing = build_pricing_options(
+        args.source,
+        args.codex_service_tier,
+        args.codex_fast_multiplier,
+    )?;
     let paths = walker::find_jsonl(&root);
 
     if !root.exists() {
@@ -239,7 +285,8 @@ fn blocks(args: BlocksArgs) -> Result<()> {
         );
     }
 
-    let report = aggregate::aggregate_blocks_source(&paths, &filters, args.source);
+    let report =
+        aggregate::aggregate_blocks_source_with_pricing(&paths, &filters, args.source, &pricing);
     let out = if args.json {
         format::format_blocks_ndjson(&report)
     } else {
@@ -317,6 +364,32 @@ fn resolve_root(override_path: Option<PathBuf>, source: Source) -> Result<PathBu
         .ok_or_else(|| anyhow!("$HOME not set; pass --root explicitly for {} logs", source))
 }
 
+fn build_pricing_options(
+    source: Source,
+    tier: CodexServiceTierArg,
+    fast_multiplier: f64,
+) -> Result<aggregate::PricingOptions> {
+    if !fast_multiplier.is_finite() || fast_multiplier <= 0.0 {
+        return Err(anyhow!(
+            "bad --codex-fast-multiplier `{}` (expected a positive number)",
+            fast_multiplier
+        ));
+    }
+    let codex_service_tier_override = if source == Source::Codex {
+        match tier {
+            CodexServiceTierArg::Auto => None,
+            CodexServiceTierArg::Standard => Some(ServiceTier::Standard),
+            CodexServiceTierArg::Fast => Some(ServiceTier::Fast),
+        }
+    } else {
+        None
+    };
+    Ok(aggregate::PricingOptions {
+        codex_service_tier_override,
+        codex_fast_multiplier: fast_multiplier,
+    })
+}
+
 fn build_filters(args: &DailyArgs) -> Result<aggregate::Filters> {
     let parse_date = |s: &str| -> Result<NaiveDate> {
         NaiveDate::parse_from_str(s, "%Y-%m-%d")
@@ -347,6 +420,8 @@ mod tests {
             project: None,
             json: false,
             root: None,
+            codex_service_tier: CodexServiceTierArg::Auto,
+            codex_fast_multiplier: 2.0,
         }
     }
 

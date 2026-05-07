@@ -74,6 +74,8 @@ Codex 兼容 MVP 已落地：
 - `stat session --source codex` 按 rollout 文件聚合
 - `stat blocks --source codex` 复用 5h block 视图
 - 成本列按 OpenAI API-equivalent USD 估算，token 口径来自 Codex `token_count.last_token_usage`
+- service tier 按日志字段自动拆 `Std` / `Fast`；没有字段的历史记录显示为 `Tier?`，
+  可用 `--codex-service-tier fast|standard` 显式覆盖估算
 
 Codex CLI 自身的 TUI 状态栏使用官方 `/statusline` / `[tui].status_line`。它当前只支持
 内置状态项，不支持 Claude Code 的 external command statusLine 协议；因此 Horologium

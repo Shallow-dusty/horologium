@@ -101,6 +101,16 @@ Codex `status` 会折叠 session JSONL 中最新的 `turn_context` 与 `token_co
 OpenAI API-equivalent USD 估算；Codex 订阅里的 credit 消耗可按 OpenAI 官方 Codex
 token-based rate card 对照。
 
+Codex service tier 采用“日志优先、显式覆盖兜底”的口径：如果 session JSONL 里写出
+`service_tier = "fast" | "standard"`，报表会自动拆到 `Fast` / `Std`；如果历史日志没有
+这个字段，记录会落到 `Tier?`，不伪装成已知。需要按已知运行模式估算时，可以显式覆盖：
+
+```bash
+horologium stat daily --source codex --since 2026-05-03 --codex-service-tier standard
+horologium stat daily --source codex --since 2026-05-03 --codex-service-tier fast
+horologium stat daily --source codex --since 2026-05-03 --codex-service-tier fast --codex-fast-multiplier 2
+```
+
 Codex CLI 的 TUI 状态栏请使用官方原生 `/statusline` 或 `[tui].status_line`。Codex
 当前只支持内置状态项，不支持 Claude Code 那种 external command statusLine 协议，
 所以 `horologium status --source codex` 适合调试/外部渲染 session JSONL，不会被

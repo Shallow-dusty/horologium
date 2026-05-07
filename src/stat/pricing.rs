@@ -187,6 +187,7 @@ mod tests {
             cache_creation_1h_tokens: cc1h,
             cache_read_tokens: cr,
             cwd: None,
+            service_tier: None,
         }
     }
 

@@ -23,7 +23,7 @@
 //! anomaly via stderr.
 
 use super::pricing::{cost_for_record, is_silent_unknown, lookup};
-use super::record::{ParserState, Record};
+use super::record::{ParserState, Record, ServiceTier};
 use crate::source::Source;
 use chrono::{DateTime, Local, NaiveDate, Timelike, Utc};
 use rayon::prelude::*;
@@ -42,6 +42,9 @@ pub struct Totals {
     pub cache_read_tokens: u64,
     pub cost_usd: f64,
     pub records: u64,
+    pub standard_records: u64,
+    pub fast_records: u64,
+    pub unknown_tier_records: u64,
 }
 
 impl Totals {
@@ -53,6 +56,24 @@ impl Totals {
         self.cache_read_tokens += other.cache_read_tokens;
         self.cost_usd += other.cost_usd;
         self.records += other.records;
+        self.standard_records += other.standard_records;
+        self.fast_records += other.fast_records;
+        self.unknown_tier_records += other.unknown_tier_records;
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct PricingOptions {
+    pub codex_service_tier_override: Option<ServiceTier>,
+    pub codex_fast_multiplier: f64,
+}
+
+impl Default for PricingOptions {
+    fn default() -> Self {
+        Self {
+            codex_service_tier_override: None,
+            codex_fast_multiplier: 2.0,
+        }
     }
 }
 
@@ -116,7 +137,13 @@ struct LocalAccumulator {
 }
 
 impl LocalAccumulator {
-    fn consume_record(&mut self, record: Record, filters: &Filters) {
+    fn consume_record(
+        &mut self,
+        record: Record,
+        filters: &Filters,
+        source: Source,
+        pricing: &PricingOptions,
+    ) {
         let local_dt = record.timestamp.with_timezone(&Local);
         let local_date = local_dt.date_naive();
         let local_hour = local_dt.hour() as u8;
@@ -136,8 +163,22 @@ impl LocalAccumulator {
             }
         }
 
+        let effective_tier = if source == Source::Codex {
+            pricing.codex_service_tier_override.or(record.service_tier)
+        } else {
+            record.service_tier
+        };
+        let tier_multiplier =
+            if source == Source::Codex && effective_tier == Some(ServiceTier::Fast) {
+                pricing.codex_fast_multiplier
+            } else {
+                1.0
+            };
         let (cost, price_state) = match lookup(&record.model) {
-            Some(row) => (cost_for_record(&record, row), PriceState::Priced),
+            Some(row) => (
+                cost_for_record(&record, row) * tier_multiplier,
+                PriceState::Priced,
+            ),
             None if is_silent_unknown(&record.model) => (0.0, PriceState::SilentUnknown),
             None => (0.0, PriceState::UnknownBillable),
         };
@@ -149,6 +190,9 @@ impl LocalAccumulator {
             cache_read_tokens: record.cache_read_tokens,
             cost_usd: cost,
             records: 1,
+            standard_records: u64::from(effective_tier == Some(ServiceTier::Standard)),
+            fast_records: u64::from(effective_tier == Some(ServiceTier::Fast)),
+            unknown_tier_records: u64::from(effective_tier.is_none()),
         };
         let new_summary = PerIdSummary {
             date: local_date,
@@ -174,7 +218,13 @@ impl LocalAccumulator {
         }
     }
 
-    fn consume_file(&mut self, path: &Path, filters: &Filters, source: Source) {
+    fn consume_file(
+        &mut self,
+        path: &Path,
+        filters: &Filters,
+        source: Source,
+        pricing: &PricingOptions,
+    ) {
         let file = match File::open(path) {
             Ok(f) => f,
             Err(_) => return,
@@ -190,7 +240,7 @@ impl LocalAccumulator {
                 continue;
             }
             match parser.parse_line(&line) {
-                Ok(Some(record)) => self.consume_record(record, filters),
+                Ok(Some(record)) => self.consume_record(record, filters, source, pricing),
                 Ok(None) => {}
                 Err(_) => self.malformed += 1,
             }
@@ -314,6 +364,7 @@ fn aggregate_one_session(
     path: &Path,
     filters: &Filters,
     source: Source,
+    pricing: &PricingOptions,
 ) -> (Option<SessionSummary>, u64, BTreeMap<String, u64>) {
     let file = match File::open(path) {
         Ok(f) => f,
@@ -361,8 +412,19 @@ fn aggregate_one_session(
                     }
                 }
 
+                let effective_tier = if source == Source::Codex {
+                    pricing.codex_service_tier_override.or(record.service_tier)
+                } else {
+                    record.service_tier
+                };
+                let tier_multiplier =
+                    if source == Source::Codex && effective_tier == Some(ServiceTier::Fast) {
+                        pricing.codex_fast_multiplier
+                    } else {
+                        1.0
+                    };
                 let cost = match lookup(&record.model) {
-                    Some(row) => cost_for_record(&record, row),
+                    Some(row) => cost_for_record(&record, row) * tier_multiplier,
                     None if is_silent_unknown(&record.model) => 0.0,
                     None => {
                         *unknown_models.entry(record.model.clone()).or_insert(0) += 1;
@@ -376,6 +438,9 @@ fn aggregate_one_session(
                 totals.cache_read_tokens += record.cache_read_tokens;
                 totals.cost_usd += cost;
                 totals.records += 1;
+                totals.standard_records += u64::from(effective_tier == Some(ServiceTier::Standard));
+                totals.fast_records += u64::from(effective_tier == Some(ServiceTier::Fast));
+                totals.unknown_tier_records += u64::from(effective_tier.is_none());
             }
             Ok(None) => {}
             Err(_) => malformed += 1,
@@ -450,14 +515,24 @@ pub fn aggregate_sessions(paths: &[PathBuf], filters: &Filters) -> SessionReport
     aggregate_sessions_source(paths, filters, Source::Claude)
 }
 
+#[allow(dead_code)]
 pub fn aggregate_sessions_source(
     paths: &[PathBuf],
     filters: &Filters,
     source: Source,
 ) -> SessionReport {
+    aggregate_sessions_source_with_pricing(paths, filters, source, &PricingOptions::default())
+}
+
+pub fn aggregate_sessions_source_with_pricing(
+    paths: &[PathBuf],
+    filters: &Filters,
+    source: Source,
+    pricing: &PricingOptions,
+) -> SessionReport {
     let results: Vec<_> = paths
         .par_iter()
-        .map(|path| aggregate_one_session(path, filters, source))
+        .map(|path| aggregate_one_session(path, filters, source, pricing))
         .collect();
 
     let mut sessions = Vec::new();
@@ -491,11 +566,21 @@ pub fn aggregate_daily(paths: &[PathBuf], filters: &Filters) -> Report {
     aggregate_daily_source(paths, filters, Source::Claude)
 }
 
+#[allow(dead_code)]
 pub fn aggregate_daily_source(paths: &[PathBuf], filters: &Filters, source: Source) -> Report {
+    aggregate_daily_source_with_pricing(paths, filters, source, &PricingOptions::default())
+}
+
+pub fn aggregate_daily_source_with_pricing(
+    paths: &[PathBuf],
+    filters: &Filters,
+    source: Source,
+    pricing: &PricingOptions,
+) -> Report {
     paths
         .par_iter()
         .fold(LocalAccumulator::default, |mut acc, path| {
-            acc.consume_file(path, filters, source);
+            acc.consume_file(path, filters, source, pricing);
             acc
         })
         .reduce(LocalAccumulator::default, LocalAccumulator::merge)
@@ -508,15 +593,25 @@ pub fn aggregate_blocks(paths: &[PathBuf], filters: &Filters) -> BlockReport {
     aggregate_blocks_source(paths, filters, Source::Claude)
 }
 
+#[allow(dead_code)]
 pub fn aggregate_blocks_source(
     paths: &[PathBuf],
     filters: &Filters,
     source: Source,
 ) -> BlockReport {
+    aggregate_blocks_source_with_pricing(paths, filters, source, &PricingOptions::default())
+}
+
+pub fn aggregate_blocks_source_with_pricing(
+    paths: &[PathBuf],
+    filters: &Filters,
+    source: Source,
+    pricing: &PricingOptions,
+) -> BlockReport {
     paths
         .par_iter()
         .fold(LocalAccumulator::default, |mut acc, path| {
-            acc.consume_file(path, filters, source);
+            acc.consume_file(path, filters, source, pricing);
             acc
         })
         .reduce(LocalAccumulator::default, LocalAccumulator::merge)
@@ -630,6 +725,39 @@ mod tests {
         assert_eq!(r.rows[&d].output_tokens, 375);
         assert!(r.rows[&d].cost_usd > 0.0);
         assert_eq!(r.malformed_lines, 0);
+    }
+
+    #[test]
+    fn codex_fast_override_counts_and_multiplies_cost() {
+        let tmp = tempfile::tempdir().unwrap();
+        let ctx = codex_context("turn_1", "gpt-5.5", "/work/project");
+        let a = codex_token_count("2026-05-03T09:01:00Z", 1000, 250, 125);
+        let path = write_jsonl(tmp.path(), "codex.jsonl", &[&ctx, &a]);
+        let d = NaiveDate::from_ymd_opt(2026, 5, 3).unwrap();
+
+        let standard = aggregate_daily_source_with_pricing(
+            std::slice::from_ref(&path),
+            &Filters::default(),
+            Source::Codex,
+            &PricingOptions {
+                codex_service_tier_override: Some(ServiceTier::Standard),
+                codex_fast_multiplier: 2.0,
+            },
+        );
+        let fast = aggregate_daily_source_with_pricing(
+            &[path],
+            &Filters::default(),
+            Source::Codex,
+            &PricingOptions {
+                codex_service_tier_override: Some(ServiceTier::Fast),
+                codex_fast_multiplier: 2.0,
+            },
+        );
+
+        assert_eq!(standard.rows[&d].standard_records, 1);
+        assert_eq!(standard.rows[&d].fast_records, 0);
+        assert_eq!(fast.rows[&d].fast_records, 1);
+        assert!((fast.rows[&d].cost_usd - standard.rows[&d].cost_usd * 2.0).abs() < 1e-9);
     }
 
     #[test]

@@ -12,6 +12,9 @@ use super::aggregate::{BlockReport, Report, SessionReport};
 const HEADERS: &[&str] = &[
     "Day",
     "Records",
+    "Std",
+    "Fast",
+    "Tier?",
     "Input",
     "Cache-5m",
     "Cache-1h",
@@ -48,6 +51,9 @@ pub fn format_table(report: &Report) -> String {
         rows.push(vec![
             date.to_string(),
             fmt_thousands(t.records),
+            fmt_thousands(t.standard_records),
+            fmt_thousands(t.fast_records),
+            fmt_thousands(t.unknown_tier_records),
             fmt_thousands(t.input_tokens),
             fmt_thousands(t.cache_creation_5m_tokens),
             fmt_thousands(t.cache_creation_1h_tokens),
@@ -61,6 +67,9 @@ pub fn format_table(report: &Report) -> String {
     let total_row = vec![
         "TOTAL".to_string(),
         fmt_thousands(total.records),
+        fmt_thousands(total.standard_records),
+        fmt_thousands(total.fast_records),
+        fmt_thousands(total.unknown_tier_records),
         fmt_thousands(total.input_tokens),
         fmt_thousands(total.cache_creation_5m_tokens),
         fmt_thousands(total.cache_creation_1h_tokens),
@@ -140,6 +149,13 @@ pub fn format_table(report: &Report) -> String {
             ));
         }
     }
+    if total.unknown_tier_records > 0 {
+        out.push('\n');
+        out.push_str(&format!(
+            "note: {} record(s) have unknown service tier; use --codex-service-tier fast|standard for explicit Codex estimates\n",
+            total.unknown_tier_records
+        ));
+    }
 
     out
 }
@@ -154,6 +170,9 @@ fn total_of(report: &Report) -> super::aggregate::Totals {
         t.cache_read_tokens += row.cache_read_tokens;
         t.cost_usd += row.cost_usd;
         t.records += row.records;
+        t.standard_records += row.standard_records;
+        t.fast_records += row.fast_records;
+        t.unknown_tier_records += row.unknown_tier_records;
     }
     t
 }
@@ -169,6 +188,9 @@ pub fn format_ndjson(report: &Report) -> String {
         let obj = serde_json::json!({
             "date": date.to_string(),
             "records": t.records,
+            "standard_records": t.standard_records,
+            "fast_records": t.fast_records,
+            "unknown_tier_records": t.unknown_tier_records,
             "input_tokens": t.input_tokens,
             "output_tokens": t.output_tokens,
             "cache_creation_5m_tokens": t.cache_creation_5m_tokens,
@@ -182,7 +204,9 @@ pub fn format_ndjson(report: &Report) -> String {
     out
 }
 
-const BLOCK_HEADERS: &[&str] = &["Day", "Window", "Records", "Input", "Output", "Cost"];
+const BLOCK_HEADERS: &[&str] = &[
+    "Day", "Window", "Records", "Std", "Fast", "Tier?", "Input", "Output", "Cost",
+];
 
 pub fn format_blocks_table(report: &BlockReport) -> String {
     let mut rows: Vec<Vec<String>> = Vec::with_capacity(report.rows.len() + 2);
@@ -192,6 +216,9 @@ pub fn format_blocks_table(report: &BlockReport) -> String {
             key.date.to_string(),
             key.label().to_string(),
             fmt_thousands(t.records),
+            fmt_thousands(t.standard_records),
+            fmt_thousands(t.fast_records),
+            fmt_thousands(t.unknown_tier_records),
             fmt_thousands(t.input_tokens),
             fmt_thousands(t.output_tokens),
             fmt_cost(t.cost_usd),
@@ -204,11 +231,17 @@ pub fn format_blocks_table(report: &BlockReport) -> String {
         total.output_tokens += t.output_tokens;
         total.cost_usd += t.cost_usd;
         total.records += t.records;
+        total.standard_records += t.standard_records;
+        total.fast_records += t.fast_records;
+        total.unknown_tier_records += t.unknown_tier_records;
     }
     rows.push(vec![
         "TOTAL".to_string(),
         String::new(),
         fmt_thousands(total.records),
+        fmt_thousands(total.standard_records),
+        fmt_thousands(total.fast_records),
+        fmt_thousands(total.unknown_tier_records),
         fmt_thousands(total.input_tokens),
         fmt_thousands(total.output_tokens),
         fmt_cost(total.cost_usd),
@@ -279,6 +312,13 @@ pub fn format_blocks_table(report: &BlockReport) -> String {
             ));
         }
     }
+    if total.unknown_tier_records > 0 {
+        out.push('\n');
+        out.push_str(&format!(
+            "note: {} record(s) have unknown service tier; use --codex-service-tier fast|standard for explicit Codex estimates\n",
+            total.unknown_tier_records
+        ));
+    }
 
     out
 }
@@ -291,6 +331,9 @@ pub fn format_blocks_ndjson(report: &BlockReport) -> String {
             "window": key.label(),
             "block": key.block,
             "records": t.records,
+            "standard_records": t.standard_records,
+            "fast_records": t.fast_records,
+            "unknown_tier_records": t.unknown_tier_records,
             "input_tokens": t.input_tokens,
             "output_tokens": t.output_tokens,
             "cache_creation_5m_tokens": t.cache_creation_5m_tokens,
@@ -305,7 +348,8 @@ pub fn format_blocks_ndjson(report: &BlockReport) -> String {
 }
 
 const SESSION_HEADERS: &[&str] = &[
-    "Session", "Start", "Duration", "Project", "Records", "Input", "Output", "Cost",
+    "Session", "Start", "Duration", "Project", "Records", "Std", "Fast", "Tier?", "Input",
+    "Output", "Cost",
 ];
 
 fn truncate_id(id: &str, max_chars: usize) -> String {
@@ -341,6 +385,9 @@ pub fn format_sessions_table(report: &SessionReport) -> String {
             fmt_duration_hm(duration),
             s.project.clone(),
             fmt_thousands(s.totals.records),
+            fmt_thousands(s.totals.standard_records),
+            fmt_thousands(s.totals.fast_records),
+            fmt_thousands(s.totals.unknown_tier_records),
             fmt_thousands(s.totals.input_tokens),
             fmt_thousands(s.totals.output_tokens),
             fmt_cost(s.totals.cost_usd),
@@ -354,6 +401,9 @@ pub fn format_sessions_table(report: &SessionReport) -> String {
         total.output_tokens += s.totals.output_tokens;
         total.cost_usd += s.totals.cost_usd;
         total.records += s.totals.records;
+        total.standard_records += s.totals.standard_records;
+        total.fast_records += s.totals.fast_records;
+        total.unknown_tier_records += s.totals.unknown_tier_records;
     }
     let total_row = vec![
         "TOTAL".to_string(),
@@ -361,6 +411,9 @@ pub fn format_sessions_table(report: &SessionReport) -> String {
         String::new(),
         String::new(),
         fmt_thousands(total.records),
+        fmt_thousands(total.standard_records),
+        fmt_thousands(total.fast_records),
+        fmt_thousands(total.unknown_tier_records),
         fmt_thousands(total.input_tokens),
         fmt_thousands(total.output_tokens),
         fmt_cost(total.cost_usd),
@@ -424,6 +477,13 @@ pub fn format_sessions_table(report: &SessionReport) -> String {
             ));
         }
     }
+    if total.unknown_tier_records > 0 {
+        out.push('\n');
+        out.push_str(&format!(
+            "note: {} record(s) have unknown service tier; use --codex-service-tier fast|standard for explicit Codex estimates\n",
+            total.unknown_tier_records
+        ));
+    }
 
     out
 }
@@ -439,6 +499,9 @@ pub fn format_sessions_ndjson(report: &SessionReport) -> String {
             "duration_seconds": duration,
             "project": s.project,
             "records": s.totals.records,
+            "standard_records": s.totals.standard_records,
+            "fast_records": s.totals.fast_records,
+            "unknown_tier_records": s.totals.unknown_tier_records,
             "input_tokens": s.totals.input_tokens,
             "output_tokens": s.totals.output_tokens,
             "cache_creation_5m_tokens": s.totals.cache_creation_5m_tokens,
@@ -471,6 +534,7 @@ mod tests {
                 cache_read_tokens: 1_024,
                 cost_usd: 1.23,
                 records: 15,
+                ..Totals::default()
             },
         );
         rows.insert(
@@ -483,6 +547,7 @@ mod tests {
                 cache_read_tokens: 0,
                 cost_usd: 12.50,
                 records: 3,
+                ..Totals::default()
             },
         );
         Report {
@@ -580,6 +645,7 @@ mod tests {
                         cache_read_tokens: 100_000,
                         cost_usd: 12.34,
                         records: 50,
+                        ..Totals::default()
                     },
                 },
                 SessionSummary {
@@ -595,6 +661,7 @@ mod tests {
                         cache_read_tokens: 50_000,
                         cost_usd: 3.21,
                         records: 10,
+                        ..Totals::default()
                     },
                 },
             ],
