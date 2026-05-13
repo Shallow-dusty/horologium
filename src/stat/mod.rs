@@ -25,6 +25,7 @@ mod format;
 pub(crate) mod pricing;
 mod record;
 mod walker;
+mod windows;
 
 #[derive(Args)]
 pub struct StatArgs {
@@ -40,6 +41,59 @@ enum StatCommand {
     Session(SessionArgs),
     /// Aggregate usage by 5-hour blocks (aligned to rate limit windows).
     Blocks(BlocksArgs),
+    /// Aggregate Codex rate-limit windows (5h or 7d) from session JSONL.
+    Windows(WindowsArgs),
+}
+
+#[derive(Args)]
+struct WindowsArgs {
+    /// Input log source. Only `codex` produces data; `claude` returns empty.
+    #[arg(long, value_enum, default_value_t = Source::Codex)]
+    source: Source,
+    /// Which rate-limit tier to report (5h primary or 7d secondary).
+    #[arg(long, value_enum, default_value_t = TierArg::Sevenday)]
+    tier: TierArg,
+    /// Cost display mode:
+    /// - `std`: API-equivalent (GPT-5.5 public rates) only
+    /// - `agg`: std × multiplier, approximating OpenAI Pro internal billing
+    /// - `both`: show both columns side by side
+    #[arg(long, value_enum, default_value_t = CostModeArg::Std)]
+    cost_mode: CostModeArg,
+    /// Multiplier applied to `std` cost to derive `agg` cost. Calibrate
+    /// against your ChatGPT statusline value at a known used_percent
+    /// (default 1.5x matches typical Pro Lite observation).
+    #[arg(long, default_value_t = 1.5)]
+    cost_multiplier: f64,
+    /// Emit one JSON object per window (pipe-friendly) instead of a table.
+    #[arg(long)]
+    json: bool,
+    /// Override the logs root (default depends on --source).
+    #[arg(long)]
+    root: Option<PathBuf>,
+    /// Hide windows whose max used_percent is below this threshold.
+    /// Filters noise from short sessions that never accumulated usage.
+    #[arg(long, default_value_t = 0.0)]
+    min_used_percent: f64,
+}
+
+#[derive(Clone, Copy, Debug, clap::ValueEnum)]
+enum TierArg {
+    /// 5-hour rolling window (`primary`).
+    #[value(name = "5h")]
+    Fivehour,
+    /// 7-day rolling window (`secondary`).
+    #[value(name = "7d")]
+    Sevenday,
+}
+
+#[derive(Clone, Copy, Debug, clap::ValueEnum)]
+enum CostModeArg {
+    /// API-equivalent (GPT-5.5 public rates) only.
+    Std,
+    /// std × multiplier (default 1.5).
+    Agg,
+    /// Both columns side by side.
+    Both,
 }
 
 #[derive(Args)]
@@ -118,7 +172,90 @@ pub fn run(args: StatArgs) -> Result<()> {
         StatCommand::Daily(d) => daily(d),
         StatCommand::Session(s) => session(s),
         StatCommand::Blocks(b) => blocks(b),
+        StatCommand::Windows(w) => run_windows(w),
     }
+}
+
+fn run_windows(args: WindowsArgs) -> Result<()> {
+    let root = resolve_root(args.root.clone(), args.source)?;
+    let paths = walker::find_jsonl(&root);
+
+    if !root.exists() {
+        eprintln!(
+            "warning: root `{}` does not exist — report will be empty",
+            root.display(),
+        );
+    } else if paths.is_empty() {
+        eprintln!(
+            "hint: no .jsonl files found under `{}` — is `--root` correct?",
+            root.display(),
+        );
+    }
+
+    let tier = match args.tier {
+        TierArg::Fivehour => windows::Tier::Primary,
+        TierArg::Sevenday => windows::Tier::Secondary,
+    };
+    let cost_mode = match args.cost_mode {
+        CostModeArg::Std => windows::CostMode::Std,
+        CostModeArg::Agg => windows::CostMode::Aggressive,
+        CostModeArg::Both => windows::CostMode::Both,
+    };
+    let multiplier = if args.cost_multiplier.is_finite() && args.cost_multiplier > 0.0 {
+        args.cost_multiplier
+    } else {
+        return Err(anyhow!("--cost-multiplier must be a positive finite number"));
+    };
+    let mut report = windows::aggregate(&paths, args.source, tier, multiplier);
+    if args.min_used_percent > 0.0 {
+        report
+            .windows
+            .retain(|w| w.max_used_percent >= args.min_used_percent);
+    }
+
+    if args.json {
+        let out = format::format_windows_ndjson(&report);
+        print!("{}", out);
+    } else {
+        let out = format::format_windows_table(&report, cost_mode);
+        print!("{}", out);
+        // Stamp a short disclaimer so users don't read the cost column as
+        // gospel — OpenAI Pro internal billing isn't fully public.
+        match cost_mode {
+            windows::CostMode::Std => {
+                eprintln!(
+                    "note: Cost is API-equivalent (GPT-5.5 public rates). OpenAI Pro internal billing \
+                     is typically 30-50% higher; pass `--cost-mode agg` or `both` to add a calibrated estimate."
+                );
+            }
+            windows::CostMode::Aggressive => {
+                eprintln!(
+                    "note: Cost = std × {:.2}x (OpenAI Pro internal billing estimate). \
+                     Calibrate `--cost-multiplier` against your ChatGPT statusline at a known used_percent.",
+                    multiplier
+                );
+            }
+            windows::CostMode::Both => {
+                eprintln!(
+                    "note: StdCost = API-equivalent (GPT-5.5). AggCost = std × {:.2}x \
+                     (calibrate via `--cost-multiplier`). EstLimit uses Std cost; multiply by {:.2}x \
+                     for the aggressive estimate.",
+                    multiplier, multiplier
+                );
+            }
+        }
+    }
+
+    if !matches!(args.source, Source::Codex) {
+        eprintln!(
+            "note: `--source {}` does not carry rate-limit fields; only `codex` is supported",
+            args.source,
+        );
+    }
+    if report.malformed_lines > 0 {
+        eprintln!("note: {} malformed line(s) skipped", report.malformed_lines);
+    }
+    Ok(())
 }
 
 fn daily(args: DailyArgs) -> Result<()> {

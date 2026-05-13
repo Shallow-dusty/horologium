@@ -7,6 +7,7 @@
 //! all align without wrapping.
 
 use super::aggregate::{BlockReport, Report, SessionReport};
+use super::windows::{CostMode, Window, WindowsReport};
 
 /// Column order, left-to-right.
 const HEADERS: &[&str] = &[
@@ -328,6 +329,165 @@ fn fmt_duration_hm(secs: i64) -> String {
 fn fmt_local_time(ts: &chrono::DateTime<chrono::Utc>) -> String {
     use chrono::Local;
     ts.with_timezone(&Local).format("%m-%d %H:%M").to_string()
+}
+
+/// Cost column header(s) for the given mode.
+fn window_cost_headers(mode: CostMode) -> Vec<&'static str> {
+    match mode {
+        CostMode::Std => vec!["Cost"],
+        CostMode::Aggressive => vec!["Cost"],
+        CostMode::Both => vec!["StdCost", "AggCost"],
+    }
+}
+
+fn window_cost_cells(w: &Window, mode: CostMode) -> Vec<String> {
+    match mode {
+        CostMode::Std => vec![fmt_cost(w.cost_usd_std)],
+        CostMode::Aggressive => vec![fmt_cost(w.cost_usd_aggressive)],
+        CostMode::Both => vec![
+            fmt_cost(w.cost_usd_std),
+            fmt_cost(w.cost_usd_aggressive),
+        ],
+    }
+}
+
+fn window_cost_totals(windows: &[&Window], mode: CostMode) -> Vec<String> {
+    let std_sum: f64 = windows.iter().map(|w| w.cost_usd_std).sum();
+    let agg_sum: f64 = windows.iter().map(|w| w.cost_usd_aggressive).sum();
+    match mode {
+        CostMode::Std => vec![fmt_cost(std_sum)],
+        CostMode::Aggressive => vec![fmt_cost(agg_sum)],
+        CostMode::Both => vec![fmt_cost(std_sum), fmt_cost(agg_sum)],
+    }
+}
+
+pub fn format_windows_table(report: &WindowsReport, mode: CostMode) -> String {
+    let tier = report.tier.label();
+
+    let mut windows: Vec<&Window> = report.windows.iter().collect();
+    windows.sort_by_key(|w| w.resets_at);
+
+    // Header sections: [Tier, Resets-At, First-Seen, Last-Seen, Max%, Last%, Sess]
+    // + cost column(s) + [EstLimit, Plan]
+    let mut headers: Vec<&'static str> = vec![
+        "Tier",
+        "Resets-At-UTC",
+        "First-Seen",
+        "Last-Seen",
+        "Max%",
+        "Last%",
+        "Sess",
+    ];
+    headers.extend(window_cost_headers(mode));
+    headers.extend_from_slice(&["EstLimit", "Plan"]);
+
+    let mut rows: Vec<Vec<String>> = Vec::with_capacity(windows.len() + 1);
+    let mut max_pct_overall: f64 = 0.0;
+    for w in &windows {
+        let limit = w
+            .estimated_limit_usd(mode)
+            .map(fmt_cost)
+            .unwrap_or_else(|| "—".to_string());
+        let mut row = vec![
+            tier.to_string(),
+            super::windows::fmt_ts(w.resets_at),
+            w.first_observed.format("%m-%d %H:%M").to_string(),
+            w.last_observed.format("%m-%d %H:%M").to_string(),
+            format!("{:.1}%", w.max_used_percent),
+            format!("{:.1}%", w.last_used_percent),
+            fmt_thousands(w.session_count as u64),
+        ];
+        row.extend(window_cost_cells(w, mode));
+        row.push(limit);
+        row.push(w.plan_type.clone().unwrap_or_default());
+        rows.push(row);
+        if w.max_used_percent > max_pct_overall {
+            max_pct_overall = w.max_used_percent;
+        }
+    }
+    let mut total_row = vec![
+        "TOTAL".to_string(),
+        format!("{} windows", windows.len()),
+        String::new(),
+        String::new(),
+        format!("{:.1}%", max_pct_overall),
+        String::new(),
+        String::new(),
+    ];
+    total_row.extend(window_cost_totals(&windows, mode));
+    total_row.push(String::new());
+    total_row.push(String::new());
+    rows.push(total_row);
+
+    let mut widths: Vec<usize> = headers.iter().map(|h| h.len()).collect();
+    for row in &rows {
+        for (i, cell) in row.iter().enumerate() {
+            widths[i] = widths[i].max(cell.len());
+        }
+    }
+
+    let mut out = String::new();
+    for (i, h) in headers.iter().enumerate() {
+        if i == 0 {
+            out.push_str(&format!("{:<w$}", h, w = widths[i]));
+        } else {
+            out.push_str(&format!("  {:>w$}", h, w = widths[i]));
+        }
+    }
+    out.push('\n');
+    let total_width: usize = widths.iter().sum::<usize>() + 2 * (widths.len() - 1);
+    out.push_str(&"-".repeat(total_width));
+    out.push('\n');
+
+    let body_len = rows.len() - 1;
+    for (row_idx, row) in rows.iter().enumerate() {
+        if row_idx == body_len {
+            out.push_str(&"-".repeat(total_width));
+            out.push('\n');
+        }
+        for (i, cell) in row.iter().enumerate() {
+            if i == 0 {
+                out.push_str(&format!("{:<w$}", cell, w = widths[i]));
+            } else {
+                out.push_str(&format!("  {:>w$}", cell, w = widths[i]));
+            }
+        }
+        out.push('\n');
+    }
+    out
+}
+
+pub fn format_windows_ndjson(report: &WindowsReport) -> String {
+    let tier = report.tier.label();
+    let mut windows: Vec<&Window> = report.windows.iter().collect();
+    windows.sort_by_key(|w| w.resets_at);
+    let mut out = String::new();
+    for w in windows {
+        let obj = serde_json::json!({
+            "tier": tier,
+            "resets_at": w.resets_at,
+            "window_minutes": w.window_minutes,
+            "first_observed": w.first_observed.to_rfc3339(),
+            "last_observed": w.last_observed.to_rfc3339(),
+            "max_used_percent": w.max_used_percent,
+            "last_used_percent": w.last_used_percent,
+            "session_count": w.session_count,
+            "event_count": w.event_count,
+            "input_tokens": w.input_tokens,
+            "cached_input_tokens": w.cached_input_tokens,
+            "output_tokens": w.output_tokens,
+            "reasoning_output_tokens": w.reasoning_output_tokens,
+            "cost_usd_std": w.cost_usd_std,
+            "cost_usd_aggressive": w.cost_usd_aggressive,
+            "cost_multiplier": report.cost_multiplier,
+            "estimated_limit_usd_std": w.estimated_limit_usd(CostMode::Std),
+            "estimated_limit_usd_aggressive": w.estimated_limit_usd(CostMode::Aggressive),
+            "plan_type": w.plan_type,
+        });
+        out.push_str(&serde_json::to_string(&obj).unwrap());
+        out.push('\n');
+    }
+    out
 }
 
 pub fn format_sessions_table(report: &SessionReport) -> String {
