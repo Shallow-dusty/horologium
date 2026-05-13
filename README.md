@@ -173,6 +173,69 @@ GPT-5.2 的当前公开费率。
 cost 计 0，并在底部列出 warning。按 `message.id` 跨文件去重，消息不会被
 重复计费。665 文件 / 517 MB 的语料在 8 核上 ~60 ms 扫完。
 
+## `stat windows` — Codex 限额窗口反推
+
+OpenAI 在每个 `token_count` 事件里附带服务端权威的 `rate_limits` 字段：
+
+```json
+"rate_limits": {
+  "primary":   {"used_percent": 21.0, "window_minutes": 300,   "resets_at": 1778602873},
+  "secondary": {"used_percent": 5.0,  "window_minutes": 10080, "resets_at": 1779166500},
+  "plan_type": "prolite"
+}
+```
+
+`stat windows` 按 `resets_at` 唯一值把事件聚成滚动窗口（分钟级归一化避免秒级抖动），
+每个窗口记录峰值 + 末次 used_percent、覆盖 session 数、token deltas，以及
+GPT-5.5 公开费率算出的 USD-equivalent cost。再用 `cost / used_percent × 100`
+反推 100% 限额的 USD 估值。
+
+```bash
+horologium stat windows                            # 默认 7d (secondary)
+horologium stat windows --tier 5h                  # 5h (primary)
+horologium stat windows --min-used-percent 10      # 过滤几乎空闲的窗口
+horologium stat windows --cost-mode both           # std + aggressive 双列
+horologium stat windows --cost-mode agg \
+                       --cost-multiplier 1.53      # 按 ChatGPT statusline 校准
+horologium stat windows --json                     # NDJSON，含全字段
+```
+
+### Std vs Aggressive 计价
+
+OpenAI Pro / Pro Lite 的内部计费规则不完全公开（fast mode、reasoning
+surcharge、Codex preview multiplier 等），实际配额消耗通常比 API 公价
+高 **30-50%**。Horologium 同时暴露两种估算：
+
+| 模式 | 算法 | 用途 |
+|---|---|---|
+| `std` (默认) | GPT-5.5 公开费率 × token delta | API-equivalent 下限 |
+| `agg` | `std × cost_multiplier`（默认 1.5x）| OpenAI Pro 内部账单估算 |
+| `both` | 两列并排展示 | 调试、校准 multiplier |
+
+**校准方法**：在某个 used_percent 已知的时刻看 ChatGPT statusline 显示的
+"cost"，用 `--cost-multiplier=<statusline cost / std cost>` 校准。
+
+输出示例（`--cost-mode both`）：
+
+```
+Tier  Resets-At-UTC     Last-Seen    Max%   Last%  Sess   StdCost   AggCost  EstLimit     Plan
+7d    2026-05-12 04:55  05-12 05:10  74.0%  71.0%   114   $583.23   $874.85   $821.45  prolite
+7d    2026-05-19 04:55  05-13 00:52  35.0%  35.0%     7   $249.17   $373.75   $711.90  prolite
+```
+
+`Max%` 是窗口内的峰值，`Last%` 是末次观测 — 后者匹配用户在 statusline
+最后看到的状态。`EstLimit` 默认用 `Std` cost 反推；切到 `agg` 后改用
+aggressive cost 反推。
+
+### 字段含义速查
+
+- `primary` ↔ 5 小时滚动窗口（`window_minutes: 300`）
+- `secondary` ↔ 7 天滚动窗口（`window_minutes: 10080`）
+- `resets_at` ↔ 下次窗口边界的 unix 时间戳（UTC）；同一窗口内所有事件共享
+- `plan_type` ↔ 订阅类型（`plus` / `prolite` / `pro` …）
+- 窗口切换的判据：`resets_at` 跳到一个新值 — 服务端可能在到期前给"重置红包"，
+  此时窗口数会比自然 7 天周期更多
+
 ## 与 `statusline.sh` 的 parity 承诺
 
 Horologium 对标 `~/.claude/statusline.sh` 的行为，在下列条件下保证 branch-by-branch 一致：
