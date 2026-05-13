@@ -13,18 +13,19 @@ Claude Code 生态里状态栏和用量分析各有一把刀：
 
 两者都是 `npx` 跑的 Node 程序，**冷启动 0.8–1.5s**。状态栏这种每条消息都会被触发的热路径，Node 冷启动是硬成本；Claude Code v2.1.80+ 又已经把 `rate_limits.five_hour` / `seven_day` 字段直接推进 stdin JSON，服务端权威数据也不再需要本地日志估算。
 
-Horologium 做三件事：
+Horologium 做四件事：
 
 1. **`horologium status`** — 从 stdin 读 Claude Code JSON，打印状态栏。目标冷启动 < 20 ms。
-2. **`horologium stat`** — 解析 JSONL 日志，出用量/成本报表（替代 ccusage 主业）。
-3. **`horologium configure`** — 管理状态栏 TOML 配置；TUI 配置器留作后续。
+2. **`horologium now`** — 零输入快照：当前 5h + 7d 窗口的 used%、resets-in、剩余 USD。
+3. **`horologium daily` / `sessions` / `blocks` / `windows`** — 解析 JSONL 日志，出用量/成本/限额报表（替代 ccusage 主业）。
+4. **`horologium configure`** — 管理状态栏 TOML 配置；TUI 配置器留作后续。
 
 ## 当前状态
 
 - Phase 1 `status`：**v1.1 已完成 + dogfooding 中**。全功能模式冷启动 <1 ms（比 bash 35 ms 快 35×+）。
-- Phase 2 `stat`：**v2.1.0 已完成**。`daily` / `session` / `blocks` 覆盖历史、会话和 5h 窗口聚合。
+- Phase 2 用量分析：**v2.2.0 已完成**。`daily` / `sessions` / `blocks` / `windows` / `now` 覆盖历史、会话、5h 块和 Codex rate-limit 窗口。
 - Phase 3 `configure`：**TOML 配置 MVP 已实现**。支持生成/校验配置、调整渲染开关、segment 顺序/隐藏、Powerline 颜色和阈值。
-- Phase 5 `--source codex`：**Codex 兼容 MVP 已实现**。`status` / `stat daily` / `stat session` / `stat blocks` 均可读 Codex session JSONL。
+- Phase 5 `--source codex`：**Codex 兼容 MVP 已实现**。`status` / `daily` / `sessions` / `blocks` / `windows` / `now` 均可读 Codex session JSONL。
 
 路线图详见 [`docs/roadmap.md`](docs/roadmap.md)。
 
@@ -80,14 +81,20 @@ Opus 4.7  01.Horologium  main  15%  $1.23  5h:75%⏳2h14m  7d:92%⏳3d5h
 
 ## 数据源
 
-默认数据源是 Claude Code。Codex 兼容通过 `--source codex` 开启：
+`status` 默认 Claude Code；其余 `stat` 类命令（`daily` / `sessions` / `blocks` / `windows` / `now`）
+**默认 `--source codex`**（Max 订阅不计费、Codex 才是钱花的地方）。切回 Claude 用 `--src claude`：
 
 ```bash
 horologium status --source codex < ~/.codex/sessions/2026/05/03/rollout-xxx.jsonl
-horologium stat daily --source codex
-horologium stat session --source codex --sort-cost
-horologium stat blocks --source codex
+horologium daily                            # 默认 codex
+horologium sessions --sort-cost
+horologium blocks
+horologium daily --src claude               # 切到 Claude
 ```
+
+> **命令迁移**：以前的 `horologium stat daily` 现在直接写 `horologium daily`。`stat` 子命令组
+> 仍然能用（隐藏 alias，脚本不受影响），但 `--help` 不再列出，新写法更短。
+> 同时引入两个 flag 缩写：`--src` ≡ `--source`、`--show` ≡ `--cost-mode`、`--mult` ≡ `--cost-multiplier`。
 
 默认日志路径：
 
@@ -136,20 +143,43 @@ horologium configure codex-statusline  # 输出推荐的 ~/.codex/config.toml �
 - `[thresholds]`：调整 rate limit 的绿/黄/红阈值
 - `configure codex-statusline`：输出 Codex CLI 原生 `[tui].status_line` 推荐配置
 
-## `stat daily`
+## `now` — 当前窗口剩余一眼看
 
-按日聚合 `~/.claude/projects/**/*.jsonl` 里的用量，打印 table 或 NDJSON。
-弥补 Claude Code `/usage` TUI 的"仅看当前会话"盲区 —— 适合跨会话累计、
-按项目看花销、CI/脚本集成。
+零输入：把 5h 与 7d 两个滚动窗口的 used%、剩余时间、剩余 USD 在一屏内打出，方便随手核对
+"还能撒几次野"。
 
 ```bash
-horologium stat daily                          # 全部历史
-horologium stat daily --since 2026-04-01       # 限定时间
-horologium stat daily --since 2026-04-01 --until 2026-04-23
-horologium stat daily --project Horologium     # cwd 子串过滤
-horologium stat daily --json                   # NDJSON，pipe 到 jq
-horologium stat daily --root /other/path       # 指向非默认 projects 目录
-horologium stat daily --source codex           # 统计 ~/.codex/sessions
+horologium now                       # 默认 codex，--show both
+horologium now --show std            # 只看 API 等价价
+horologium now --mult 1.6            # 用更激进的 multiplier
+horologium now --json                # NDJSON，5h + 7d 两行
+```
+
+输出示例：
+
+```
+Tier  Used%  Resets-In     Resets-At-UTC  Rem.Std  Rem.Agg     Plan
+-------------------------------------------------------------------
+5h    90.0%        27m  2026-05-13 02:58    $1.32    $2.02  prolite
+7d    35.0%       6d2h  2026-05-19 04:55  $462.74  $707.99  prolite
+```
+
+`Rem.Std` 是 GPT-5.5 公开费率反推的剩余；`Rem.Agg` 是 `× --mult`（默认 1.5x）后逼近 ChatGPT
+statusline 的估算。
+
+## `daily`
+
+按日聚合 JSONL 日志的用量，打印 table 或 NDJSON。弥补 Claude Code `/usage` TUI 的"仅看当前
+会话"盲区 —— 适合跨会话累计、按项目看花销、CI/脚本集成。
+
+```bash
+horologium daily                          # 全部历史（默认 codex）
+horologium daily --since 2026-04-01       # 限定时间
+horologium daily --since 2026-04-01 --until 2026-04-23
+horologium daily --project Horologium     # cwd 子串过滤
+horologium daily --json                   # NDJSON，pipe 到 jq
+horologium daily --root /other/path       # 指向非默认 projects 目录
+horologium daily --src claude             # 切到 Claude
 ```
 
 输出示例：
@@ -173,7 +203,7 @@ GPT-5.2 的当前公开费率。
 cost 计 0，并在底部列出 warning。按 `message.id` 跨文件去重，消息不会被
 重复计费。665 文件 / 517 MB 的语料在 8 核上 ~60 ms 扫完。
 
-## `stat windows` — Codex 限额窗口反推
+## `windows` — Codex 限额窗口反推
 
 OpenAI 在每个 `token_count` 事件里附带服务端权威的 `rate_limits` 字段：
 
@@ -185,20 +215,23 @@ OpenAI 在每个 `token_count` 事件里附带服务端权威的 `rate_limits` �
 }
 ```
 
-`stat windows` 按 `resets_at` 唯一值把事件聚成滚动窗口（分钟级归一化避免秒级抖动），
+`windows` 按 `resets_at` 唯一值把事件聚成滚动窗口（分钟级归一化避免秒级抖动），
 每个窗口记录峰值 + 末次 used_percent、覆盖 session 数、token deltas，以及
 GPT-5.5 公开费率算出的 USD-equivalent cost。再用 `cost / used_percent × 100`
 反推 100% 限额的 USD 估值。
 
 ```bash
-horologium stat windows                            # 默认 7d (secondary)
-horologium stat windows --tier 5h                  # 5h (primary)
-horologium stat windows --min-used-percent 10      # 过滤几乎空闲的窗口
-horologium stat windows --cost-mode both           # std + aggressive 双列
-horologium stat windows --cost-mode agg \
-                       --cost-multiplier 1.53      # 按 ChatGPT statusline 校准
-horologium stat windows --json                     # NDJSON，含全字段
+horologium windows                       # 默认 7d (secondary)
+horologium windows 5h                    # 5h (primary)
+horologium windows 7d --min-used 10      # 过滤几乎空闲的窗口
+horologium windows 7d --show both        # std + aggressive 双列
+horologium windows 7d --show agg \
+                     --mult 1.53         # 按 ChatGPT statusline 校准
+horologium windows 7d --json             # NDJSON，含全字段
 ```
+
+> 旧写法 `stat windows --tier 5h --cost-mode agg --cost-multiplier 1.53` 仍然能用
+> （隐藏兼容），新写法只是更短。
 
 ### Std vs Aggressive 计价
 
@@ -213,7 +246,7 @@ surcharge、Codex preview multiplier 等），实际配额消耗通常比 API �
 | `both` | 两列并排展示 | 调试、校准 multiplier |
 
 **校准方法**：在某个 used_percent 已知的时刻看 ChatGPT statusline 显示的
-"cost"，用 `--cost-multiplier=<statusline cost / std cost>` 校准。
+"cost"，用 `--mult=<statusline cost / std cost>` 校准。
 
 输出示例（`--cost-mode both`）：
 
@@ -280,7 +313,7 @@ cargo fmt -- --check                               # 格式
 ## 与原版的关系
 
 - 不 fork 不绑定，schema 对齐 Claude Code 官方 `statusLine` stdin JSON 规范
-- `stat` 子命令会兼容 ccusage 的 JSONL 路径约定（`~/.claude/projects/*.jsonl`）
+- 用量分析子命令兼容 ccusage 的 JSONL 路径约定（`~/.claude/projects/*.jsonl`）
 - Codex 兼容读取本地 `~/.codex/sessions/**/*.jsonl`，不依赖 Codex 私有运行时
 - 不依赖 ccusage/ccstatusline 任何运行时
 
