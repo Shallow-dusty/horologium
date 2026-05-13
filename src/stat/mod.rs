@@ -25,7 +25,14 @@ mod format;
 pub(crate) mod pricing;
 mod record;
 mod walker;
-mod windows;
+pub mod windows;
+
+/// Re-export for sibling modules (e.g. `crate::now`) that need to discover
+/// JSONL files under a custom root without depending on the private
+/// `walker` module directly.
+pub fn walker_find_jsonl(root: &std::path::Path) -> Vec<PathBuf> {
+    walker::find_jsonl(root)
+}
 
 #[derive(Args)]
 pub struct StatArgs {
@@ -46,24 +53,29 @@ enum StatCommand {
 }
 
 #[derive(Args)]
-struct WindowsArgs {
+pub struct WindowsArgs {
+    /// Tier: `5h` (primary) or `7d` (secondary). Optional positional;
+    /// defaults to `7d`. Backed by `--tier` for backward compatibility.
+    #[arg(value_enum, default_value_t = TierArg::Sevenday)]
+    tier_pos: TierArg,
+    /// [deprecated alias] same as the positional `tier`. If both are set,
+    /// this wins.
+    #[arg(long, value_enum, hide = true)]
+    tier: Option<TierArg>,
     /// Input log source. Only `codex` produces data; `claude` returns empty.
-    #[arg(long, value_enum, default_value_t = Source::Codex)]
+    #[arg(long, alias = "src", value_enum, default_value_t = Source::Codex)]
     source: Source,
-    /// Which rate-limit tier to report (5h primary or 7d secondary).
-    #[arg(long, value_enum, default_value_t = TierArg::Sevenday)]
-    tier: TierArg,
     /// Cost display mode:
     /// - `std`: API-equivalent (GPT-5.5 public rates) only
     /// - `agg`: std × multiplier, approximating OpenAI Pro internal billing
     /// - `both`: show both columns side by side
-    #[arg(long, value_enum, default_value_t = CostModeArg::Std)]
-    cost_mode: CostModeArg,
+    #[arg(long, alias = "cost-mode", value_enum, default_value_t = CostModeArg::Std)]
+    show: CostModeArg,
     /// Multiplier applied to `std` cost to derive `agg` cost. Calibrate
     /// against your ChatGPT statusline value at a known used_percent
     /// (default 1.5x matches typical Pro Lite observation).
-    #[arg(long, default_value_t = 1.5)]
-    cost_multiplier: f64,
+    #[arg(long, alias = "cost-multiplier", default_value_t = 1.5)]
+    mult: f64,
     /// Emit one JSON object per window (pipe-friendly) instead of a table.
     #[arg(long)]
     json: bool,
@@ -72,8 +84,8 @@ struct WindowsArgs {
     root: Option<PathBuf>,
     /// Hide windows whose max used_percent is below this threshold.
     /// Filters noise from short sessions that never accumulated usage.
-    #[arg(long, default_value_t = 0.0)]
-    min_used_percent: f64,
+    #[arg(long, alias = "min-used-percent", default_value_t = 0.0)]
+    min_used: f64,
 }
 
 #[derive(Clone, Copy, Debug, clap::ValueEnum)]
@@ -97,9 +109,9 @@ enum CostModeArg {
 }
 
 #[derive(Args)]
-struct BlocksArgs {
+pub struct BlocksArgs {
     /// Input log source.
-    #[arg(long, value_enum, default_value_t = Source::Claude)]
+    #[arg(long, alias = "src", value_enum, default_value_t = Source::Codex)]
     source: Source,
     /// Inclusive lower bound on record date, YYYY-MM-DD (local tz).
     #[arg(long)]
@@ -119,9 +131,9 @@ struct BlocksArgs {
 }
 
 #[derive(Args)]
-struct SessionArgs {
+pub struct SessionArgs {
     /// Input log source.
-    #[arg(long, value_enum, default_value_t = Source::Claude)]
+    #[arg(long, alias = "src", value_enum, default_value_t = Source::Codex)]
     source: Source,
     /// Inclusive lower bound on session start date, YYYY-MM-DD (local tz).
     #[arg(long)]
@@ -144,9 +156,9 @@ struct SessionArgs {
 }
 
 #[derive(Args)]
-struct DailyArgs {
+pub struct DailyArgs {
     /// Input log source.
-    #[arg(long, value_enum, default_value_t = Source::Claude)]
+    #[arg(long, alias = "src", value_enum, default_value_t = Source::Codex)]
     source: Source,
     /// Inclusive lower bound on record date, YYYY-MM-DD (local tz).
     #[arg(long)]
@@ -169,14 +181,14 @@ struct DailyArgs {
 
 pub fn run(args: StatArgs) -> Result<()> {
     match args.command {
-        StatCommand::Daily(d) => daily(d),
-        StatCommand::Session(s) => session(s),
-        StatCommand::Blocks(b) => blocks(b),
+        StatCommand::Daily(d) => run_daily(d),
+        StatCommand::Session(s) => run_session(s),
+        StatCommand::Blocks(b) => run_blocks(b),
         StatCommand::Windows(w) => run_windows(w),
     }
 }
 
-fn run_windows(args: WindowsArgs) -> Result<()> {
+pub fn run_windows(args: WindowsArgs) -> Result<()> {
     let root = resolve_root(args.root.clone(), args.source)?;
     let paths = walker::find_jsonl(&root);
 
@@ -192,25 +204,26 @@ fn run_windows(args: WindowsArgs) -> Result<()> {
         );
     }
 
-    let tier = match args.tier {
+    let tier_choice = args.tier.unwrap_or(args.tier_pos);
+    let tier = match tier_choice {
         TierArg::Fivehour => windows::Tier::Primary,
         TierArg::Sevenday => windows::Tier::Secondary,
     };
-    let cost_mode = match args.cost_mode {
+    let cost_mode = match args.show {
         CostModeArg::Std => windows::CostMode::Std,
         CostModeArg::Agg => windows::CostMode::Aggressive,
         CostModeArg::Both => windows::CostMode::Both,
     };
-    let multiplier = if args.cost_multiplier.is_finite() && args.cost_multiplier > 0.0 {
-        args.cost_multiplier
+    let multiplier = if args.mult.is_finite() && args.mult > 0.0 {
+        args.mult
     } else {
-        return Err(anyhow!("--cost-multiplier must be a positive finite number"));
+        return Err(anyhow!("--mult must be a positive finite number"));
     };
     let mut report = windows::aggregate(&paths, args.source, tier, multiplier);
-    if args.min_used_percent > 0.0 {
+    if args.min_used > 0.0 {
         report
             .windows
-            .retain(|w| w.max_used_percent >= args.min_used_percent);
+            .retain(|w| w.max_used_percent >= args.min_used);
     }
 
     if args.json {
@@ -225,20 +238,20 @@ fn run_windows(args: WindowsArgs) -> Result<()> {
             windows::CostMode::Std => {
                 eprintln!(
                     "note: Cost is API-equivalent (GPT-5.5 public rates). OpenAI Pro internal billing \
-                     is typically 30-50% higher; pass `--cost-mode agg` or `both` to add a calibrated estimate."
+                     is typically 30-50% higher; pass `--show agg` or `both` to add a calibrated estimate."
                 );
             }
             windows::CostMode::Aggressive => {
                 eprintln!(
                     "note: Cost = std × {:.2}x (OpenAI Pro internal billing estimate). \
-                     Calibrate `--cost-multiplier` against your ChatGPT statusline at a known used_percent.",
+                     Calibrate `--mult` against your ChatGPT statusline at a known used_percent.",
                     multiplier
                 );
             }
             windows::CostMode::Both => {
                 eprintln!(
                     "note: StdCost = API-equivalent (GPT-5.5). AggCost = std × {:.2}x \
-                     (calibrate via `--cost-multiplier`). EstLimit uses Std cost; multiply by {:.2}x \
+                     (calibrate via `--mult`). EstLimit uses Std cost; multiply by {:.2}x \
                      for the aggressive estimate.",
                     multiplier, multiplier
                 );
@@ -258,7 +271,7 @@ fn run_windows(args: WindowsArgs) -> Result<()> {
     Ok(())
 }
 
-fn daily(args: DailyArgs) -> Result<()> {
+pub fn run_daily(args: DailyArgs) -> Result<()> {
     let root = resolve_root(args.root.clone(), args.source)?;
     let filters = build_filters(&args)?;
     let paths = walker::find_jsonl(&root);
@@ -295,7 +308,7 @@ fn daily(args: DailyArgs) -> Result<()> {
     Ok(())
 }
 
-fn session(args: SessionArgs) -> Result<()> {
+pub fn run_session(args: SessionArgs) -> Result<()> {
     let root = resolve_root(args.root.clone(), args.source)?;
     let filters = build_filters_from_session_args(&args)?;
     let paths = walker::find_jsonl(&root);
@@ -359,7 +372,7 @@ fn build_filters_from_session_args(args: &SessionArgs) -> Result<aggregate::Filt
     })
 }
 
-fn blocks(args: BlocksArgs) -> Result<()> {
+pub fn run_blocks(args: BlocksArgs) -> Result<()> {
     let root = resolve_root(args.root.clone(), args.source)?;
     let filters = build_filters_from_blocks_args(&args)?;
     let paths = walker::find_jsonl(&root);

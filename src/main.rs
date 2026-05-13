@@ -3,6 +3,7 @@ use clap::{Parser, Subcommand};
 
 mod config;
 mod git;
+mod now;
 mod source;
 mod stat;
 mod status;
@@ -22,21 +23,54 @@ struct Cli {
 enum Command {
     /// Render a status line from Claude Code stdin or a Codex session JSONL.
     Status(status::StatusArgs),
-    /// Analyze usage from agent JSONL logs.
+
+    /// Show 5h + 7d rate-limit windows at a glance (zero-input).
     ///
-    /// Example: horologium stat daily --since 2026-04-20
-    Stat(stat::StatArgs),
+    /// Example: horologium now
+    Now(now::NowArgs),
+
+    /// Aggregate Codex rate-limit windows (5h or 7d).
+    ///
+    /// Example: horologium windows 7d --show both
+    Windows(stat::WindowsArgs),
+
+    /// Aggregate usage by calendar day (local timezone).
+    ///
+    /// Example: horologium daily --since 2026-05-03
+    Daily(stat::DailyArgs),
+
+    /// Aggregate usage by session (one JSONL file = one session).
+    ///
+    /// Example: horologium sessions --sort-cost
+    #[command(alias = "session")]
+    Sessions(stat::SessionArgs),
+
+    /// Aggregate usage by 5-hour blocks (aligned to rate limit windows).
+    ///
+    /// Example: horologium blocks
+    Blocks(stat::BlocksArgs),
+
     /// Manage Horologium and agent statusline configuration.
     ///
     /// Example: horologium configure init
     Configure(config::ConfigureArgs),
+
+    /// [deprecated] Legacy `stat <sub>` namespace; prefer top-level
+    /// `daily` / `sessions` / `blocks` / `windows`.
+    #[command(hide = true)]
+    Stat(stat::StatArgs),
 }
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
         Command::Status(args) => status::run(args),
-        Command::Stat(args) => stat::run(args),
+        Command::Now(args) => now::run(args),
+        Command::Windows(args) => stat::run_windows(args),
+        Command::Daily(args) => stat::run_daily(args),
+        Command::Sessions(args) => stat::run_session(args),
+        Command::Blocks(args) => stat::run_blocks(args),
         Command::Configure(args) => config::run(args),
+        Command::Stat(args) => stat::run(args),
     }
 }
