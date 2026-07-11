@@ -25,8 +25,8 @@ pub struct NowArgs {
     /// - `std`: API-equivalent (GPT-5.5 public rates)
     /// - `agg`: std × multiplier (default 1.5x) — closer to ChatGPT statusline
     /// - `both`: show both side by side
-    #[arg(long, value_enum, default_value_t = CostModeArg::Both)]
-    show: CostModeArg,
+    #[arg(long, value_enum, default_value = "both")]
+    show: CostMode,
 
     /// Multiplier applied to `std` cost when computing `agg`.
     #[arg(long, default_value_t = 1.5)]
@@ -35,23 +35,6 @@ pub struct NowArgs {
     /// Emit one JSON object per tier (pipe-friendly) instead of a table.
     #[arg(long)]
     json: bool,
-}
-
-#[derive(Clone, Copy, Debug, clap::ValueEnum)]
-enum CostModeArg {
-    Std,
-    Agg,
-    Both,
-}
-
-impl From<CostModeArg> for CostMode {
-    fn from(c: CostModeArg) -> Self {
-        match c {
-            CostModeArg::Std => CostMode::Std,
-            CostModeArg::Agg => CostMode::Aggressive,
-            CostModeArg::Both => CostMode::Both,
-        }
-    }
 }
 
 pub fn run(args: NowArgs) -> Result<()> {
@@ -81,7 +64,7 @@ pub fn run(args: NowArgs) -> Result<()> {
     let report_7d = windows::aggregate(&paths, args.source, Tier::Secondary, args.mult);
     let cur_5h = pick_current(&report_5h.windows);
     let cur_7d = pick_current(&report_7d.windows);
-    let mode: CostMode = args.show.into();
+    let mode = args.show;
 
     if args.json {
         emit_json(&cur_5h, &cur_7d, mode, args.mult);
@@ -114,9 +97,15 @@ fn pick_current(windows: &[Window]) -> Option<Window> {
 
 fn emit_table(cur_5h: &Option<Window>, cur_7d: &Option<Window>, mode: CostMode) {
     let headers: Vec<&'static str> = match mode {
-        CostMode::Std => vec!["Tier", "Used%", "Resets-In", "Resets-At-UTC", "Rem.Cost", "Plan"],
-        CostMode::Aggressive => {
-            vec!["Tier", "Used%", "Resets-In", "Resets-At-UTC", "Rem.Cost", "Plan"]
+        CostMode::Std | CostMode::Aggressive => {
+            vec![
+                "Tier",
+                "Used%",
+                "Resets-In",
+                "Resets-At-UTC",
+                "Rem.Cost",
+                "Plan",
+            ]
         }
         CostMode::Both => vec![
             "Tier",
@@ -128,40 +117,14 @@ fn emit_table(cur_5h: &Option<Window>, cur_7d: &Option<Window>, mode: CostMode) 
             "Plan",
         ],
     };
-    let rows: Vec<Vec<String>> = [("5h", cur_5h), ("7d", cur_7d)]
+    let body: Vec<Vec<String>> = [("5h", cur_5h), ("7d", cur_7d)]
         .iter()
         .map(|(label, w)| row_for(label, w.as_ref(), mode))
         .collect();
-
-    let mut widths: Vec<usize> = headers.iter().map(|h| h.len()).collect();
-    for row in &rows {
-        for (i, cell) in row.iter().enumerate() {
-            widths[i] = widths[i].max(cell.len());
-        }
-    }
-    let mut out = String::new();
-    for (i, h) in headers.iter().enumerate() {
-        if i == 0 {
-            out.push_str(&format!("{:<w$}", h, w = widths[i]));
-        } else {
-            out.push_str(&format!("  {:>w$}", h, w = widths[i]));
-        }
-    }
-    out.push('\n');
-    let total_width: usize = widths.iter().sum::<usize>() + 2 * (widths.len() - 1);
-    out.push_str(&"-".repeat(total_width));
-    out.push('\n');
-    for row in &rows {
-        for (i, cell) in row.iter().enumerate() {
-            if i == 0 {
-                out.push_str(&format!("{:<w$}", cell, w = widths[i]));
-            } else {
-                out.push_str(&format!("  {:>w$}", cell, w = widths[i]));
-            }
-        }
-        out.push('\n');
-    }
-    print!("{}", out);
+    print!(
+        "{}",
+        crate::stat::format::align_table(&headers, &body, None)
+    );
 }
 
 fn row_for(label: &str, w: Option<&Window>, mode: CostMode) -> Vec<String> {

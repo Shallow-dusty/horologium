@@ -6,8 +6,98 @@
 //! to the widest cell so rollups from small to production-scale corpora
 //! all align without wrapping.
 
-use super::aggregate::{BlockReport, Report, SessionReport};
+use super::aggregate::{BlockReport, Report, ReportDiagnostics, SessionReport};
 use super::windows::{CostMode, Window, WindowsReport};
+
+/// Render a monospace-aligned table from pre-built cell strings.
+///
+/// `body` rows are printed after a header separator. When `total` is
+/// `Some`, a second separator is printed before the total row. All
+/// columns are sized to the widest cell across headers + body + total.
+/// Column 0 is left-aligned; the rest are right-aligned and prefixed
+/// with two spaces — matching the legacy hand-rolled renderers
+/// byte-for-byte so existing parity snapshots stay green.
+pub(crate) fn align_table(
+    headers: &[&str],
+    body: &[Vec<String>],
+    total: Option<&Vec<String>>,
+) -> String {
+    let mut widths: Vec<usize> = headers.iter().map(|h| h.len()).collect();
+    for row in body.iter().chain(total) {
+        for (i, cell) in row.iter().enumerate() {
+            if i < widths.len() {
+                widths[i] = widths[i].max(cell.len());
+            }
+        }
+    }
+    let total_width: usize = widths.iter().sum::<usize>() + 2 * widths.len().saturating_sub(1);
+    let mut out = String::new();
+    for (i, h) in headers.iter().enumerate() {
+        push_cell(&mut out, h, widths[i], i == 0);
+    }
+    out.push('\n');
+    out.push_str(&"-".repeat(total_width));
+    out.push('\n');
+    for row in body {
+        for (i, cell) in row.iter().enumerate() {
+            push_cell(&mut out, cell, widths.get(i).copied().unwrap_or(0), i == 0);
+        }
+        out.push('\n');
+    }
+    if let Some(total) = total {
+        out.push_str(&"-".repeat(total_width));
+        out.push('\n');
+        for (i, cell) in total.iter().enumerate() {
+            push_cell(&mut out, cell, widths.get(i).copied().unwrap_or(0), i == 0);
+        }
+        out.push('\n');
+    }
+    out
+}
+
+fn push_cell(out: &mut String, cell: &str, width: usize, left_align: bool) {
+    if left_align {
+        out.push_str(&format!("{:<w$}", cell, w = width));
+    } else {
+        out.push_str(&format!("  {:>w$}", cell, w = width));
+    }
+}
+
+/// Append the malformed / divergent-duplicates / unknown-models notes
+/// used at the bottom of `format_table`, `format_blocks_table`, and
+/// `format_sessions_table`. Blank-line placement matches the legacy
+/// hand-rolled output byte-for-byte.
+fn format_diagnostics_notes<R: ReportDiagnostics>(report: &R) -> String {
+    let mut out = String::new();
+    if report.malformed_lines() > 0 {
+        out.push('\n');
+        out.push_str(&format!(
+            "note: {} malformed line(s) skipped\n",
+            report.malformed_lines()
+        ));
+    }
+    if report.divergent_duplicates() > 0 {
+        if report.malformed_lines() == 0 {
+            out.push('\n');
+        }
+        out.push_str(&format!(
+            "note: {} duplicate message.id(s) carried divergent payloads — kept first-seen (log may be corrupted)\n",
+            report.divergent_duplicates(),
+        ));
+    }
+    let unknown = report.unknown_models();
+    if !unknown.is_empty() {
+        out.push('\n');
+        out.push_str("note: records with unpriced models (tokens counted, cost excluded):\n");
+        for (model, count) in unknown.iter().take(5) {
+            out.push_str(&format!("  {} × {}\n", model, count));
+        }
+        if unknown.len() > 5 {
+            out.push_str(&format!("  … and {} more\n", unknown.len() - 5));
+        }
+    }
+    out
+}
 
 /// Column order, left-to-right.
 const HEADERS: &[&str] = &[
@@ -43,10 +133,9 @@ fn fmt_cost(c: f64) -> String {
 /// and, when non-empty, a note summarizing malformed lines and the first
 /// few unknown-model entries.
 pub fn format_table(report: &Report) -> String {
-    let mut rows: Vec<Vec<String>> = Vec::with_capacity(report.rows.len() + 2);
-
+    let mut body: Vec<Vec<String>> = Vec::with_capacity(report.rows.len());
     for (date, t) in &report.rows {
-        rows.push(vec![
+        body.push(vec![
             date.to_string(),
             fmt_thousands(t.records),
             fmt_thousands(t.input_tokens),
@@ -69,79 +158,9 @@ pub fn format_table(report: &Report) -> String {
         fmt_thousands(total.output_tokens),
         fmt_cost(total.cost_usd),
     ];
-    rows.push(total_row);
 
-    // Column widths = max(header, all cells).
-    let mut widths: Vec<usize> = HEADERS.iter().map(|h| h.len()).collect();
-    for row in &rows {
-        for (i, cell) in row.iter().enumerate() {
-            widths[i] = widths[i].max(cell.len());
-        }
-    }
-
-    let mut out = String::new();
-    // Header
-    for (i, h) in HEADERS.iter().enumerate() {
-        if i == 0 {
-            out.push_str(&format!("{:<w$}", h, w = widths[i]));
-        } else {
-            out.push_str(&format!("  {:>w$}", h, w = widths[i]));
-        }
-    }
-    out.push('\n');
-    // Separator
-    let total_width: usize = widths.iter().sum::<usize>() + 2 * (widths.len() - 1);
-    out.push_str(&"-".repeat(total_width));
-    out.push('\n');
-    // Body
-    // Separator before TOTAL
-    let body_len = rows.len() - 1;
-    for (row_idx, row) in rows.iter().enumerate() {
-        if row_idx == body_len {
-            // Print another separator before the TOTAL row.
-            out.push_str(&"-".repeat(total_width));
-            out.push('\n');
-        }
-        for (i, cell) in row.iter().enumerate() {
-            if i == 0 {
-                out.push_str(&format!("{:<w$}", cell, w = widths[i]));
-            } else {
-                out.push_str(&format!("  {:>w$}", cell, w = widths[i]));
-            }
-        }
-        out.push('\n');
-    }
-
-    if report.malformed_lines > 0 {
-        out.push('\n');
-        out.push_str(&format!(
-            "note: {} malformed line(s) skipped\n",
-            report.malformed_lines
-        ));
-    }
-    if report.divergent_duplicates > 0 {
-        if report.malformed_lines == 0 {
-            out.push('\n');
-        }
-        out.push_str(&format!(
-            "note: {} duplicate message.id(s) carried divergent payloads — kept first-seen (log may be corrupted)\n",
-            report.divergent_duplicates,
-        ));
-    }
-    if !report.unknown_models.is_empty() {
-        out.push('\n');
-        out.push_str("note: records with unpriced models (tokens counted, cost excluded):\n");
-        for (model, count) in report.unknown_models.iter().take(5) {
-            out.push_str(&format!("  {} × {}\n", model, count));
-        }
-        if report.unknown_models.len() > 5 {
-            out.push_str(&format!(
-                "  … and {} more\n",
-                report.unknown_models.len() - 5
-            ));
-        }
-    }
-
+    let mut out = align_table(HEADERS, &body, Some(&total_row));
+    out.push_str(&format_diagnostics_notes(report));
     out
 }
 
@@ -186,10 +205,9 @@ pub fn format_ndjson(report: &Report) -> String {
 const BLOCK_HEADERS: &[&str] = &["Day", "Window", "Records", "Input", "Output", "Cost"];
 
 pub fn format_blocks_table(report: &BlockReport) -> String {
-    let mut rows: Vec<Vec<String>> = Vec::with_capacity(report.rows.len() + 2);
-
+    let mut body: Vec<Vec<String>> = Vec::with_capacity(report.rows.len());
     for (key, t) in &report.rows {
-        rows.push(vec![
+        body.push(vec![
             key.date.to_string(),
             key.label().to_string(),
             fmt_thousands(t.records),
@@ -206,81 +224,17 @@ pub fn format_blocks_table(report: &BlockReport) -> String {
         total.cost_usd += t.cost_usd;
         total.records += t.records;
     }
-    rows.push(vec![
+    let total_row = vec![
         "TOTAL".to_string(),
         String::new(),
         fmt_thousands(total.records),
         fmt_thousands(total.input_tokens),
         fmt_thousands(total.output_tokens),
         fmt_cost(total.cost_usd),
-    ]);
+    ];
 
-    let mut widths: Vec<usize> = BLOCK_HEADERS.iter().map(|h| h.len()).collect();
-    for row in &rows {
-        for (i, cell) in row.iter().enumerate() {
-            widths[i] = widths[i].max(cell.len());
-        }
-    }
-
-    let mut out = String::new();
-    for (i, h) in BLOCK_HEADERS.iter().enumerate() {
-        if i == 0 {
-            out.push_str(&format!("{:<w$}", h, w = widths[i]));
-        } else {
-            out.push_str(&format!("  {:>w$}", h, w = widths[i]));
-        }
-    }
-    out.push('\n');
-    let total_width: usize = widths.iter().sum::<usize>() + 2 * (widths.len() - 1);
-    out.push_str(&"-".repeat(total_width));
-    out.push('\n');
-
-    let body_len = rows.len() - 1;
-    for (row_idx, row) in rows.iter().enumerate() {
-        if row_idx == body_len {
-            out.push_str(&"-".repeat(total_width));
-            out.push('\n');
-        }
-        for (i, cell) in row.iter().enumerate() {
-            if i == 0 {
-                out.push_str(&format!("{:<w$}", cell, w = widths[i]));
-            } else {
-                out.push_str(&format!("  {:>w$}", cell, w = widths[i]));
-            }
-        }
-        out.push('\n');
-    }
-
-    if report.malformed_lines > 0 {
-        out.push('\n');
-        out.push_str(&format!(
-            "note: {} malformed line(s) skipped\n",
-            report.malformed_lines
-        ));
-    }
-    if report.divergent_duplicates > 0 {
-        if report.malformed_lines == 0 {
-            out.push('\n');
-        }
-        out.push_str(&format!(
-            "note: {} duplicate message.id(s) carried divergent payloads — kept first-seen (log may be corrupted)\n",
-            report.divergent_duplicates,
-        ));
-    }
-    if !report.unknown_models.is_empty() {
-        out.push('\n');
-        out.push_str("note: records with unpriced models (tokens counted, cost excluded):\n");
-        for (model, count) in report.unknown_models.iter().take(5) {
-            out.push_str(&format!("  {} × {}\n", model, count));
-        }
-        if report.unknown_models.len() > 5 {
-            out.push_str(&format!(
-                "  … and {} more\n",
-                report.unknown_models.len() - 5
-            ));
-        }
-    }
-
+    let mut out = align_table(BLOCK_HEADERS, &body, Some(&total_row));
+    out.push_str(&format_diagnostics_notes(report));
     out
 }
 
@@ -344,10 +298,7 @@ fn window_cost_cells(w: &Window, mode: CostMode) -> Vec<String> {
     match mode {
         CostMode::Std => vec![fmt_cost(w.cost_usd_std)],
         CostMode::Aggressive => vec![fmt_cost(w.cost_usd_aggressive)],
-        CostMode::Both => vec![
-            fmt_cost(w.cost_usd_std),
-            fmt_cost(w.cost_usd_aggressive),
-        ],
+        CostMode::Both => vec![fmt_cost(w.cost_usd_std), fmt_cost(w.cost_usd_aggressive)],
     }
 }
 
@@ -381,7 +332,7 @@ pub fn format_windows_table(report: &WindowsReport, mode: CostMode) -> String {
     headers.extend(window_cost_headers(mode));
     headers.extend_from_slice(&["EstLimit", "Plan"]);
 
-    let mut rows: Vec<Vec<String>> = Vec::with_capacity(windows.len() + 1);
+    let mut body: Vec<Vec<String>> = Vec::with_capacity(windows.len());
     let mut max_pct_overall: f64 = 0.0;
     for w in &windows {
         let limit = w
@@ -400,7 +351,7 @@ pub fn format_windows_table(report: &WindowsReport, mode: CostMode) -> String {
         row.extend(window_cost_cells(w, mode));
         row.push(limit);
         row.push(w.plan_type.clone().unwrap_or_default());
-        rows.push(row);
+        body.push(row);
         if w.max_used_percent > max_pct_overall {
             max_pct_overall = w.max_used_percent;
         }
@@ -417,44 +368,8 @@ pub fn format_windows_table(report: &WindowsReport, mode: CostMode) -> String {
     total_row.extend(window_cost_totals(&windows, mode));
     total_row.push(String::new());
     total_row.push(String::new());
-    rows.push(total_row);
 
-    let mut widths: Vec<usize> = headers.iter().map(|h| h.len()).collect();
-    for row in &rows {
-        for (i, cell) in row.iter().enumerate() {
-            widths[i] = widths[i].max(cell.len());
-        }
-    }
-
-    let mut out = String::new();
-    for (i, h) in headers.iter().enumerate() {
-        if i == 0 {
-            out.push_str(&format!("{:<w$}", h, w = widths[i]));
-        } else {
-            out.push_str(&format!("  {:>w$}", h, w = widths[i]));
-        }
-    }
-    out.push('\n');
-    let total_width: usize = widths.iter().sum::<usize>() + 2 * (widths.len() - 1);
-    out.push_str(&"-".repeat(total_width));
-    out.push('\n');
-
-    let body_len = rows.len() - 1;
-    for (row_idx, row) in rows.iter().enumerate() {
-        if row_idx == body_len {
-            out.push_str(&"-".repeat(total_width));
-            out.push('\n');
-        }
-        for (i, cell) in row.iter().enumerate() {
-            if i == 0 {
-                out.push_str(&format!("{:<w$}", cell, w = widths[i]));
-            } else {
-                out.push_str(&format!("  {:>w$}", cell, w = widths[i]));
-            }
-        }
-        out.push('\n');
-    }
-    out
+    align_table(&headers, &body, Some(&total_row))
 }
 
 pub fn format_windows_ndjson(report: &WindowsReport) -> String {
@@ -491,11 +406,10 @@ pub fn format_windows_ndjson(report: &WindowsReport) -> String {
 }
 
 pub fn format_sessions_table(report: &SessionReport) -> String {
-    let mut rows: Vec<Vec<String>> = Vec::with_capacity(report.sessions.len() + 2);
-
+    let mut body: Vec<Vec<String>> = Vec::with_capacity(report.sessions.len());
     for s in &report.sessions {
         let duration = (s.end - s.start).num_seconds();
-        rows.push(vec![
+        body.push(vec![
             truncate_id(&s.session_id, 8),
             fmt_local_time(&s.start),
             fmt_duration_hm(duration),
@@ -525,66 +439,9 @@ pub fn format_sessions_table(report: &SessionReport) -> String {
         fmt_thousands(total.output_tokens),
         fmt_cost(total.cost_usd),
     ];
-    rows.push(total_row);
 
-    let mut widths: Vec<usize> = SESSION_HEADERS.iter().map(|h| h.len()).collect();
-    for row in &rows {
-        for (i, cell) in row.iter().enumerate() {
-            widths[i] = widths[i].max(cell.len());
-        }
-    }
-
-    let mut out = String::new();
-    // Header
-    for (i, h) in SESSION_HEADERS.iter().enumerate() {
-        if i == 0 {
-            out.push_str(&format!("{:<w$}", h, w = widths[i]));
-        } else {
-            out.push_str(&format!("  {:>w$}", h, w = widths[i]));
-        }
-    }
-    out.push('\n');
-    let total_width: usize = widths.iter().sum::<usize>() + 2 * (widths.len() - 1);
-    out.push_str(&"-".repeat(total_width));
-    out.push('\n');
-
-    let body_len = rows.len() - 1;
-    for (row_idx, row) in rows.iter().enumerate() {
-        if row_idx == body_len {
-            out.push_str(&"-".repeat(total_width));
-            out.push('\n');
-        }
-        for (i, cell) in row.iter().enumerate() {
-            if i == 0 {
-                out.push_str(&format!("{:<w$}", cell, w = widths[i]));
-            } else {
-                out.push_str(&format!("  {:>w$}", cell, w = widths[i]));
-            }
-        }
-        out.push('\n');
-    }
-
-    if report.malformed_lines > 0 {
-        out.push('\n');
-        out.push_str(&format!(
-            "note: {} malformed line(s) skipped\n",
-            report.malformed_lines
-        ));
-    }
-    if !report.unknown_models.is_empty() {
-        out.push('\n');
-        out.push_str("note: records with unpriced models (tokens counted, cost excluded):\n");
-        for (model, count) in report.unknown_models.iter().take(5) {
-            out.push_str(&format!("  {} × {}\n", model, count));
-        }
-        if report.unknown_models.len() > 5 {
-            out.push_str(&format!(
-                "  … and {} more\n",
-                report.unknown_models.len() - 5
-            ));
-        }
-    }
-
+    let mut out = align_table(SESSION_HEADERS, &body, Some(&total_row));
+    out.push_str(&format_diagnostics_notes(report));
     out
 }
 

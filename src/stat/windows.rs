@@ -28,16 +28,20 @@ use std::collections::BTreeMap;
 use std::path::Path;
 
 use chrono::{DateTime, TimeZone, Utc};
+use clap::ValueEnum;
 use serde::Deserialize;
 
 use crate::source::Source;
 
-/// Which rate-limit tier to report on.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// Which rate-limit tier to report on. Directly used as a clap `ValueEnum`
+/// so the CLI surface (`5h` / `7d`) stays in one place — no wrapper enum.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
 pub enum Tier {
     /// 5-hour rolling window (`primary`).
+    #[value(name = "5h")]
     Primary,
     /// 7-day rolling window (`secondary`).
+    #[value(name = "7d")]
     Secondary,
 }
 
@@ -102,14 +106,18 @@ impl Window {
     }
 }
 
-/// Selects which cost column(s) the report exposes.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// Selects which cost column(s) the report exposes. Directly used as a
+/// clap `ValueEnum` (`std` / `agg` / `both`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
 pub enum CostMode {
     /// API-equivalent pricing only (GPT-5.5 public rates).
+    #[value(name = "std")]
     Std,
     /// Std × multiplier; defaults to 1.5x to approximate OpenAI Pro internal billing.
+    #[value(name = "agg")]
     Aggressive,
     /// Show both columns side by side.
+    #[value(name = "both")]
     Both,
 }
 
@@ -308,9 +316,7 @@ pub fn aggregate(
 
         // Update consumed baseline so subsequent events from the same
         // session only add their own incremental tokens.
-        let entry = session_consumed
-            .entry(e.session_id.clone())
-            .or_insert_with(TokenUsage::default);
+        let entry = session_consumed.entry(e.session_id.clone()).or_default();
         if e.cum.input_tokens > entry.input_tokens {
             entry.input_tokens = e.cum.input_tokens;
         }
@@ -393,7 +399,10 @@ fn parse_event(line: &str, session_id: &str) -> anyhow::Result<Option<Event>> {
     let inner = if payload.get("type").and_then(|t| t.as_str()) == Some("token_count") {
         payload
     } else if payload.get("type").and_then(|t| t.as_str()) == Some("event_msg") {
-        let inner = payload.get("payload").cloned().unwrap_or(serde_json::Value::Null);
+        let inner = payload
+            .get("payload")
+            .cloned()
+            .unwrap_or(serde_json::Value::Null);
         if inner.get("type").and_then(|t| t.as_str()) != Some("token_count") {
             return Ok(None);
         }
@@ -410,7 +419,10 @@ fn parse_event(line: &str, session_id: &str) -> anyhow::Result<Option<Event>> {
     }
     let rate_limits: RateLimitsFrame = serde_json::from_value(rate_limits_value)?;
 
-    let info_value = inner.get("info").cloned().unwrap_or(serde_json::Value::Null);
+    let info_value = inner
+        .get("info")
+        .cloned()
+        .unwrap_or(serde_json::Value::Null);
     let cum = if info_value.is_null() {
         TokenUsage::default()
     } else {

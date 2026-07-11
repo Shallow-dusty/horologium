@@ -286,6 +286,53 @@ pub struct BlockReport {
     pub divergent_duplicates: u64,
 }
 
+/// Read access to the diagnostics fields shared by all three report
+/// types (`Report` / `BlockReport` / `SessionReport`). Lets `format`
+/// and the CLI dispatcher share one note-rendering path without
+/// coupling to concrete report structs. `SessionReport` does not track
+/// divergent duplicates (its dedup path predates `LocalAccumulator`),
+/// so the default returns 0 — see AGENTS.md "后续项".
+pub trait ReportDiagnostics {
+    fn malformed_lines(&self) -> u64;
+    fn unknown_models(&self) -> &BTreeMap<String, u64>;
+    fn divergent_duplicates(&self) -> u64 {
+        0
+    }
+}
+
+impl ReportDiagnostics for Report {
+    fn malformed_lines(&self) -> u64 {
+        self.malformed_lines
+    }
+    fn unknown_models(&self) -> &BTreeMap<String, u64> {
+        &self.unknown_models
+    }
+    fn divergent_duplicates(&self) -> u64 {
+        self.divergent_duplicates
+    }
+}
+
+impl ReportDiagnostics for BlockReport {
+    fn malformed_lines(&self) -> u64 {
+        self.malformed_lines
+    }
+    fn unknown_models(&self) -> &BTreeMap<String, u64> {
+        &self.unknown_models
+    }
+    fn divergent_duplicates(&self) -> u64 {
+        self.divergent_duplicates
+    }
+}
+
+impl ReportDiagnostics for SessionReport {
+    fn malformed_lines(&self) -> u64 {
+        self.malformed_lines
+    }
+    fn unknown_models(&self) -> &BTreeMap<String, u64> {
+        &self.unknown_models
+    }
+}
+
 /// One session's aggregated data.
 #[derive(Debug, Clone)]
 pub struct SessionSummary {
