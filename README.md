@@ -1,6 +1,6 @@
 # Horologium
 
-> Claude Code 的统一状态栏与用量解析工具，用 Rust 写。单二进制、冷启动毫秒级。
+> 跨 Agent CLI 的统一状态栏与用量解析工具，用 Rust 写。单二进制、冷启动毫秒级、零 Node 依赖。当前覆盖 Claude Code 与 Codex。
 
 `Horologium` 是拉丁语"时钟/计时器"，对应 5h 与 7d 配额窗口两台走针不停的钟。
 
@@ -23,7 +23,7 @@ Horologium 做四件事：
 ## 当前状态
 
 - Phase 1 `status`：**v1.1 已完成 + dogfooding 中**。全功能模式冷启动 <1 ms（比 bash 35 ms 快 35×+）。
-- Phase 2 用量分析：**v2.2.0 已完成**。`daily` / `sessions` / `blocks` / `windows` / `now` 覆盖历史、会话、5h 块和 Codex rate-limit 窗口。
+- Phase 2 用量分析：**v2.1.0 已完成**。`daily` / `sessions` / `blocks` / `windows` / `now` 覆盖历史、会话、5h 块和 Codex rate-limit 窗口。
 - Phase 3 `configure`：**TOML 配置 MVP 已实现**。支持生成/校验配置、调整渲染开关、segment 顺序/隐藏、Powerline 颜色和阈值。
 - Phase 5 `--source codex`：**Codex 兼容 MVP 已实现**。`status` / `daily` / `sessions` / `blocks` / `windows` / `now` 均可读 Codex session JSONL。
 
