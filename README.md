@@ -92,9 +92,7 @@ horologium blocks
 horologium daily --src claude               # 切到 Claude
 ```
 
-> **命令迁移**：以前的 `horologium stat daily` 现在直接写 `horologium daily`。`stat` 子命令组
-> 仍然能用（隐藏 alias，脚本不受影响），但 `--help` 不再列出，新写法更短。
-> 同时引入两个 flag 缩写：`--src` ≡ `--source`、`--show` ≡ `--cost-mode`、`--mult` ≡ `--cost-multiplier`。
+> **flag 缩写**：`--src` ≡ `--source`、`--show` ≡ `--cost-mode`、`--mult` ≡ `--cost-multiplier`。
 
 默认日志路径：
 
@@ -230,8 +228,7 @@ horologium windows 7d --show agg \
 horologium windows 7d --json             # NDJSON，含全字段
 ```
 
-> 旧写法 `stat windows --tier 5h --cost-mode agg --cost-multiplier 1.53` 仍然能用
-> （隐藏兼容），新写法只是更短。
+> flag 缩写：`windows 5h --show agg --mult 1.53` 是 `--show agg --cost-multiplier 1.53` 的简写。
 
 ### Std vs Aggressive 计价
 

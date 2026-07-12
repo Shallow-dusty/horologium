@@ -162,7 +162,7 @@ pub fn run(args: StatusArgs) -> Result<()> {
         eprintln!("To enable, add to ~/.claude/settings.json:");
         eprintln!(r#"  "statusLine": {{ "type": "command", "command": "horologium status" }}"#);
         eprintln!();
-        eprintln!("Try `horologium stat daily` for interactive usage analytics.");
+        eprintln!("Try `horologium daily` for interactive usage analytics.");
         std::process::exit(0);
     }
 

@@ -214,27 +214,10 @@ fn fmt_duration(secs: i64) -> String {
 }
 
 fn emit_disclaimer(mode: CostMode, mult: f64) {
-    match mode {
-        CostMode::Std => {
-            eprintln!(
-                "note: Rem.Cost = API-equivalent (GPT-5.5 public rates); OpenAI Pro internal billing \
-                 is typically 30-50% higher. Pass `--show agg` or `both` for a calibrated estimate."
-            );
-        }
-        CostMode::Aggressive => {
-            eprintln!(
-                "note: Rem.Cost = std × {:.2}x (OpenAI Pro internal billing estimate). \
-                 Calibrate `--mult` against your ChatGPT statusline at a known used_percent.",
-                mult,
-            );
-        }
-        CostMode::Both => {
-            eprintln!(
-                "note: Rem.Std = API-equivalent; Rem.Agg = std × {:.2}x (calibrate via `--mult`).",
-                mult,
-            );
-        }
-    }
+    eprintln!(
+        "{}",
+        windows::cost_disclaimer(mode, mult, windows::DisclaimerScope::Remaining)
+    );
 }
 
 fn emit_json(cur_5h: &Option<Window>, cur_7d: &Option<Window>, mode: CostMode, mult: f64) {

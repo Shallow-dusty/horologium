@@ -22,7 +22,7 @@ Claude Code 2.1.118 的 `/usage` TUI 只显示**当前会话**的消耗。Max �
 - 哪个项目最烧钱？
 - 今天和昨天对比呢？
 
-Horologium 的 `stat daily` 子命令直接读本地的 `~/.claude/projects/**/*.jsonl`（Claude Code 自己写的会话日志），按日聚合、按项目过滤，给出完整的历史账单。**单二进制、零网络、零 Node 依赖。**
+Horologium 的 `daily` 子命令直接读本地的 `~/.claude/projects/**/*.jsonl`（Claude Code 自己写的会话日志），按日聚合、按项目过滤，给出完整的历史账单。**单二进制、零网络、零 Node 依赖。**
 
 ---
 
@@ -43,7 +43,7 @@ Horologium 的 `stat daily` 子命令直接读本地的 `~/.claude/projects/**/*
 
 颜色阈值：`<70%` 绿 / `70–89%` 黄 / `≥90%` 红。
 
-### `horologium stat daily`
+### `horologium daily`
 
 扫描本地所有会话日志，按本地时区日历日聚合，输出：
 
@@ -70,9 +70,9 @@ Horologium 的 `stat daily` 子命令直接读本地的 `~/.claude/projects/**/*
 Codex 兼容 MVP 已落地：
 
 - `status --source codex` 读取 Codex session JSONL，渲染最新 model / cwd / context / cost / rate limit
-- `stat daily --source codex` 聚合 `~/.codex/sessions/**/*.jsonl`
-- `stat session --source codex` 按 rollout 文件聚合
-- `stat blocks --source codex` 复用 5h block 视图
+- `daily --source codex` 聚合 `~/.codex/sessions/**/*.jsonl`
+- `sessions --source codex` 按 rollout 文件聚合
+- `blocks --source codex` 复用 5h block 视图
 - 成本列按 OpenAI API-equivalent USD 估算，token 口径来自 Codex `token_count.last_token_usage`
 
 Codex CLI 自身的 TUI 状态栏使用官方 `/statusline` / `[tui].status_line`。它当前只支持
@@ -83,7 +83,7 @@ Codex CLI 自身的 TUI 状态栏使用官方 `/statusline` / `[tui].status_line
 
 - 官方显示配置辅助：`configure codex-statusline` 输出推荐的 Codex 原生状态栏配置。
 - 外部状态显示：`status --source codex` 解析 session JSONL，再用 Horologium 自己的渲染器输出。
-- 数据统计：`stat daily/session/blocks --source codex` 聚合 Codex 本地日志。
+- 数据统计：`daily/sessions/blocks --source codex` 聚合 Codex 本地日志。
 
 MCP 不属于这个目标；hooks 也不作为状态栏方案。后续只有在需要补充事件采集证据时，才单独评估 hooks。
 
@@ -122,5 +122,5 @@ MCP 不属于这个目标；hooks 也不作为状态栏方案。后续只有在�
 ## 接下来
 
 - 想直接跑起来 → 看 [README.md 的快速开始](../README.md#快速开始)
-- 想看完整命令参考 → `horologium status --help` / `horologium stat daily --help` / `horologium configure --help`
+- 想看完整命令参考 → `horologium status --help` / `horologium daily --help` / `horologium configure --help`
 - 想知道为什么这样设计 / 下一步做什么 → [`docs/roadmap.md`](roadmap.md)

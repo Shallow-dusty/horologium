@@ -25,7 +25,6 @@
 //! comparable rate-limit fields.
 
 use std::collections::BTreeMap;
-use std::path::Path;
 
 use chrono::{DateTime, TimeZone, Utc};
 use clap::ValueEnum;
@@ -460,15 +459,51 @@ pub fn fmt_ts(ts: i64) -> String {
         .unwrap_or_else(|| format!("ts={}", ts))
 }
 
-#[allow(dead_code)]
-pub fn paths_root(_: &Path) {}
+/// Which output context a cost disclaimer is rendered for. The wording
+/// differs because `windows` reports cumulative window cost + EstLimit
+/// while `now` reports remaining USD — but the underlying CostMode
+/// logic is shared, so the two call sites go through one function instead
+/// of maintaining two parallel match blocks.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DisclaimerScope {
+    /// `horologium windows`: cumulative window cost + EstLimit column.
+    WindowCost,
+    /// `horologium now`: remaining-USD column.
+    Remaining,
+}
+
+/// Compose the stderr cost disclaimer for the given mode / multiplier /
+/// scope. Shared by `stat::run_windows` and `now::run` so the wording has
+/// a single source of truth — editing it here updates both commands.
+pub fn cost_disclaimer(mode: CostMode, mult: f64, scope: DisclaimerScope) -> String {
+    match (scope, mode) {
+        (DisclaimerScope::WindowCost, CostMode::Std) => "note: Cost is API-equivalent (GPT-5.5 public rates). OpenAI Pro internal billing is typically 30-50% higher; pass `--show agg` or `both` to add a calibrated estimate.".into(),
+        (DisclaimerScope::WindowCost, CostMode::Aggressive) => format!(
+            "note: Cost = std × {:.2}x (OpenAI Pro internal billing estimate). Calibrate `--mult` against your ChatGPT statusline at a known used_percent.",
+            mult
+        ),
+        (DisclaimerScope::WindowCost, CostMode::Both) => format!(
+            "note: StdCost = API-equivalent (GPT-5.5). AggCost = std × {:.2}x (calibrate via `--mult`). EstLimit uses Std cost; multiply by {:.2}x for the aggressive estimate.",
+            mult, mult
+        ),
+        (DisclaimerScope::Remaining, CostMode::Std) => "note: Rem.Cost = API-equivalent (GPT-5.5 public rates); OpenAI Pro internal billing is typically 30-50% higher. Pass `--show agg` or `both` for a calibrated estimate.".into(),
+        (DisclaimerScope::Remaining, CostMode::Aggressive) => format!(
+            "note: Rem.Cost = std × {:.2}x (OpenAI Pro internal billing estimate). Calibrate `--mult` against your ChatGPT statusline at a known used_percent.",
+            mult
+        ),
+        (DisclaimerScope::Remaining, CostMode::Both) => format!(
+            "note: Rem.Std = API-equivalent; Rem.Agg = std × {:.2}x (calibrate via `--mult`).",
+            mult
+        ),
+    }
+}
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::io::Write;
 
-    fn write_jsonl(path: &Path, lines: &[&str]) {
+    fn write_jsonl(path: &std::path::Path, lines: &[&str]) {
         let mut f = std::fs::File::create(path).unwrap();
         for l in lines {
             writeln!(f, "{}", l).unwrap();

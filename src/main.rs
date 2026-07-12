@@ -54,11 +54,6 @@ enum Command {
     ///
     /// Example: horologium configure init
     Configure(config::ConfigureArgs),
-
-    /// [deprecated] Legacy `stat <sub>` namespace; prefer top-level
-    /// `daily` / `sessions` / `blocks` / `windows`.
-    #[command(hide = true)]
-    Stat(stat::StatArgs),
 }
 
 fn main() -> Result<()> {
@@ -71,6 +66,5 @@ fn main() -> Result<()> {
         Command::Sessions(args) => stat::run_session(args),
         Command::Blocks(args) => stat::run_blocks(args),
         Command::Configure(args) => config::run(args),
-        Command::Stat(args) => stat::run(args),
     }
 }

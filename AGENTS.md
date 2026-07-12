@@ -30,7 +30,7 @@
 
 ```
 src/
-├── main.rs          # clap 分派；顶层命令 + hidden `stat` 别名
+├── main.rs          # clap 分派；顶层命令
 ├── status.rs        # Phase 1: 状态栏渲染（stdin JSON → ANSI 行）
 ├── git.rs           # .git/HEAD + origin URL 手写解析（worktree-aware，零依赖）
 ├── source.rs        # Claude / Codex source enum + default_root
@@ -64,7 +64,6 @@ horologium daily           # 按日聚合
 horologium sessions        # 按会话聚合（--sort-cost）
 horologium blocks          # 按 5h 块聚合
 horologium configure ...   # TOML 配置管理
-horologium stat <sub>      # [hidden] 旧 namespace 别名，脚本兼容
 ```
 
 `daily` / `sessions` / `blocks` / `windows` / `now` 默认 `--source codex`（Codex 才有 rate-limit 字段、Max 订阅不计费）。切 Claude 用 `--src claude`。
@@ -99,12 +98,12 @@ horologium stat <sub>      # [hidden] 旧 namespace 别名，脚本兼容
 
 release profile：`lto = "thin"` + `codegen-units = 1` + `strip = "symbols"` + `panic = "abort"`。
 
-## 后续项（重构备忘）
+## 重构备忘（已结案）
 
-- **session 聚合的 divergent 检测**（✅ 已修复 2026-07-12）：`sessions` 现在和 `daily` / `blocks` 一样检测同文件内同 `message.id` 但 payload 不一致的损坏，`SessionReport` 新增 `divergent_duplicates` 字段，表格底部和 JSON 模式 stderr 都会报 note。保留 `aggregate_one_session` 独立路径（session 是 per-file，跨文件去重无意义），只补 divergent 检测，未走 `LocalAccumulator`。
-- **`Now` vs `Windows` disclaimer 文案分叉**：两处 cost disclaimer 因语义不同（windows 是累计 cost + EstLimit，now 是剩余 cost）文案不同，未强行合并。可后续抽 `cost_disclaimer(mode, mult, scope)` 参数化。
-- **`Stat` hidden 子命令**：保留为脚本兼容别名，代码路径与顶层 `daily/sessions/blocks/windows` 共享底层，无重复。确认无脚本依赖后可删。
-- **`status` 的 `--source` 默认值**：当前 `status` 默认 Claude，其余默认 Codex。跨 agent 定位下"默认 agent"是个产品决策，待 Gemini 落地后重新评估是否需要 `configure` 里设全局默认 source。
+- **session 聚合的 divergent 检测**（✅ 2026-07-12）：`sessions` 现在和 `daily` / `blocks` 一样检测同文件内同 `message.id` 但 payload 不一致的损坏，`SessionReport` 新增 `divergent_duplicates` 字段，表格底部和 JSON 模式 stderr 都会报 note。保留 `aggregate_one_session` 独立路径（session 是 per-file，跨文件去重无意义），只补 divergent 检测，未走 `LocalAccumulator`。
+- **`Now` vs `Windows` disclaimer**（✅ 2026-07-12）：抽 `windows::cost_disclaimer(mode, mult, DisclaimerScope)`，两命令复用同一函数；`DisclaimerScope::WindowCost` / `Remaining` 区分累计 cost 与剩余 cost 的文案差异。单一来源，改一处两命令同步。
+- **`Stat` hidden 子命令**（✅ 2026-07-12 删除）：原为脚本兼容别名（thin wrapper，零逻辑重复），跨 agent 定位下 `stat` namespace 暗示 Claude Code 专属，与跨 agent 定位冲突。项目内无脚本依赖（仅 status.rs 一处引导文案 + 文档引用），删除。属 breaking CLI change，需版本 bump。
+- **`status` 默认 Claude、其余默认 Codex**（已决策，保留）：`status` 主用例是 Claude Code `settings.json` 的 statusLine 集成（stdin JSON 来自 CC），默认 Claude 对齐主用例；`daily`/`sessions`/`blocks`/`windows`/`now` 主用例是 Codex 配额监控（Codex 才有 rate-limit 字段、Max 订阅不计费），默认 Codex 对齐主用例。每个命令的默认 source 对齐它自己的主用例，比“全局统一一个默认”更合理——强行统一会让某个主用例必须显式 `--src`，是 regression。跨 agent 切换用 `--src` 即可，无需 `configure` 全局 source（YAGNI，等真有频繁切换痛点再加）。
 
 ## 参考资料
 

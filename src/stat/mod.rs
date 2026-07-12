@@ -23,7 +23,7 @@
 
 use anyhow::{anyhow, Result};
 use chrono::NaiveDate;
-use clap::{Args, Subcommand};
+use clap::Args;
 use std::path::PathBuf;
 
 use crate::source::Source;
@@ -126,36 +126,7 @@ pub struct DailyArgs {
     pub common: CommonArgs,
 }
 
-// ---- legacy `stat` subcommand namespace (hidden alias) -----------------
-
-#[derive(Args)]
-pub struct StatArgs {
-    #[command(subcommand)]
-    command: StatCommand,
-}
-
-#[derive(Subcommand)]
-enum StatCommand {
-    /// Aggregate usage by calendar day (local timezone).
-    Daily(DailyArgs),
-    /// Aggregate usage by session (one JSONL file = one session).
-    Session(SessionArgs),
-    /// Aggregate usage by 5-hour blocks (aligned to rate limit windows).
-    Blocks(BlocksArgs),
-    /// Aggregate Codex rate-limit windows (5h or 7d) from session JSONL.
-    Windows(WindowsArgs),
-}
-
 // ---- dispatch ----------------------------------------------------------
-
-pub fn run(args: StatArgs) -> Result<()> {
-    match args.command {
-        StatCommand::Daily(d) => run_daily(d),
-        StatCommand::Session(s) => run_session(s),
-        StatCommand::Blocks(b) => run_blocks(b),
-        StatCommand::Windows(w) => run_windows(w),
-    }
-}
 
 pub fn run_windows(args: WindowsArgs) -> Result<()> {
     let root = resolve_root(args.root.clone(), args.source)?;
@@ -192,31 +163,10 @@ pub fn run_windows(args: WindowsArgs) -> Result<()> {
     } else {
         let out = format::format_windows_table(&report, args.show);
         print!("{}", out);
-        // Stamp a short disclaimer so users don't read the cost column as
-        // gospel — OpenAI Pro internal billing isn't fully public.
-        match args.show {
-            windows::CostMode::Std => {
-                eprintln!(
-                    "note: Cost is API-equivalent (GPT-5.5 public rates). OpenAI Pro internal billing \
-                     is typically 30-50% higher; pass `--show agg` or `both` to add a calibrated estimate."
-                );
-            }
-            windows::CostMode::Aggressive => {
-                eprintln!(
-                    "note: Cost = std × {:.2}x (OpenAI Pro internal billing estimate). \
-                     Calibrate `--mult` against your ChatGPT statusline at a known used_percent.",
-                    multiplier
-                );
-            }
-            windows::CostMode::Both => {
-                eprintln!(
-                    "note: StdCost = API-equivalent (GPT-5.5). AggCost = std × {:.2}x \
-                     (calibrate via `--mult`). EstLimit uses Std cost; multiply by {:.2}x \
-                     for the aggressive estimate.",
-                    multiplier, multiplier
-                );
-            }
-        }
+        eprintln!(
+            "{}",
+            windows::cost_disclaimer(args.show, multiplier, windows::DisclaimerScope::WindowCost,)
+        );
     }
 
     if !matches!(args.source, Source::Codex) {
