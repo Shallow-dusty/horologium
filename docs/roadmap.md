@@ -99,7 +99,7 @@ TOML + `configure check` 足够，TUI 不作为当前兼容性工作的前置条
 
 当前项目状态：
 
-- 已完成 Codex 兼容 MVP：`status`、`stat daily`、`stat session`、`stat blocks` 均支持 `--source codex`。
+- 已完成 Codex 兼容 MVP：`status`、`daily`、`sessions`、`blocks`、`windows`、`now` 均支持 `--source codex`。
 - Codex 数据来源限定为本地 `~/.codex/sessions/**/*.jsonl`，核心口径是 `turn_context` 与 `token_count.last_token_usage`。
 - Codex 状态显示分两层：Codex TUI 内部使用官方原生 `/statusline` / `[tui].status_line`；Horologium 只做外部渲染和报告。
 - `configure codex-statusline` 是配置辅助，不是 external command hook，也不会让 Codex TUI 调用 Horologium。
@@ -114,7 +114,7 @@ TOML + `configure check` 足够，TUI 不作为当前兼容性工作的前置条
 | `stat session --source codex`：按 Codex rollout 文件聚合 | ✅ 2026-05-03：session 过滤/排序复用 |
 | `stat blocks --source codex`：按 5h block 聚合 Codex token usage | ✅ 2026-05-03：block 逻辑复用 |
 | OpenAI / Codex 模型成本估算 | ✅ 2026-05-03：GPT-5.5/5.4/5.4 mini + GPT-5.3-Codex/5.2 |
-| `stat daily --source gemini`：扫描 Gemini CLI 日志目录 | ⏳ |
+| `daily --source gemini`：扫描 Gemini CLI 日志目录 | ⏳ |
 | 多源混合聚合（跨 CLI 的统一 daily 视图） | ⏳ |
 
 **优先级**：Phase 2 与 Phase 3 TOML 配置 MVP 收口后启动；Phase 4 发布工程不再作为
@@ -129,7 +129,7 @@ Codex 兼容性的前置条件。
 | 里程碑 | 状态 |
 |---|---|
 | `plugin.json` 声明 statusLine 指向二进制 | ⏳ |
-| `/stat` slash command 包装 `horologium stat daily` | ⏳ |
+| `/stat` slash command 包装 `horologium daily` | ⏳ |
 | 配置切换 skill（powerline/multiline/hyperlinks） | ⏳ |
 
 **优先级**：最低，Phase 5 完成后再评估。Plugin 壳是薄包装，不维护双版本。

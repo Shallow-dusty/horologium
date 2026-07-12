@@ -86,7 +86,10 @@ pub fn run(args: NowArgs) -> Result<()> {
 /// last_observed-newest if every reset is already in the past (e.g. stale
 /// logs).
 fn pick_current(windows: &[Window]) -> Option<Window> {
-    let now = Utc::now().timestamp();
+    pick_current_at(windows, Utc::now().timestamp())
+}
+
+fn pick_current_at(windows: &[Window], now: i64) -> Option<Window> {
     let mut active: Vec<&Window> = windows.iter().filter(|w| w.resets_at > now).collect();
     if active.is_empty() {
         active = windows.iter().collect();
@@ -250,5 +253,86 @@ fn emit_json(cur_5h: &Option<Window>, cur_7d: &Option<Window>, mode: CostMode, m
             }),
         };
         println!("{}", serde_json::to_string(&obj).unwrap());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_window(resets_at: i64, last_observed_ts: i64) -> Window {
+        let ts = Utc.timestamp_opt(last_observed_ts, 0).single().unwrap();
+        Window {
+            resets_at,
+            window_minutes: 300,
+            first_observed: ts,
+            last_observed: ts,
+            max_used_percent: 0.0,
+            last_used_percent: 0.0,
+            plan_type: None,
+            cost_usd_std: 0.0,
+            cost_usd_aggressive: 0.0,
+            session_count: 0,
+            event_count: 0,
+            input_tokens: 0,
+            cached_input_tokens: 0,
+            output_tokens: 0,
+            reasoning_output_tokens: 0,
+        }
+    }
+
+    #[test]
+    fn fmt_duration_zero_or_negative_is_reset() {
+        assert_eq!(fmt_duration(0), "reset");
+        assert_eq!(fmt_duration(-5), "reset");
+    }
+
+    #[test]
+    fn fmt_duration_minutes_only() {
+        assert_eq!(fmt_duration(60), "1m");
+        assert_eq!(fmt_duration(45 * 60), "45m");
+    }
+
+    #[test]
+    fn fmt_duration_hours_and_minutes() {
+        assert_eq!(fmt_duration(3600), "1h0m");
+        assert_eq!(fmt_duration(2 * 3600 + 30 * 60), "2h30m");
+    }
+
+    #[test]
+    fn fmt_duration_days_and_hours() {
+        assert_eq!(fmt_duration(86400), "1d0h");
+        assert_eq!(fmt_duration(3 * 86400 + 5 * 3600), "3d5h");
+    }
+
+    #[test]
+    fn pick_current_at_prefers_future_window_with_latest_observation() {
+        let w1 = test_window(2000, 900);
+        let w2 = test_window(3000, 950);
+        let picked = pick_current_at(&[w1, w2], 1000);
+        assert_eq!(picked.unwrap().resets_at, 3000);
+    }
+
+    #[test]
+    fn pick_current_at_ignores_past_windows_when_future_exists() {
+        // A past window with a very recent observation must NOT win over
+        // a future window — the "active" filter runs before the fallback.
+        let past = test_window(500, 9999);
+        let future = test_window(2000, 900);
+        let picked = pick_current_at(&[past, future], 1000);
+        assert_eq!(picked.unwrap().resets_at, 2000);
+    }
+
+    #[test]
+    fn pick_current_at_falls_back_to_latest_when_no_future() {
+        let w1 = test_window(500, 900);
+        let w2 = test_window(600, 950);
+        let picked = pick_current_at(&[w1, w2], 1000);
+        assert_eq!(picked.unwrap().resets_at, 600);
+    }
+
+    #[test]
+    fn pick_current_at_empty_returns_none() {
+        assert!(pick_current_at(&[], 1000).is_none());
     }
 }
