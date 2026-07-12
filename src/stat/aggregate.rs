@@ -27,7 +27,7 @@ use super::record::{ParserState, Record};
 use crate::source::Source;
 use chrono::{DateTime, Local, NaiveDate, Timelike, Utc};
 use rayon::prelude::*;
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap};
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
@@ -331,6 +331,9 @@ impl ReportDiagnostics for SessionReport {
     fn unknown_models(&self) -> &BTreeMap<String, u64> {
         &self.unknown_models
     }
+    fn divergent_duplicates(&self) -> u64 {
+        self.divergent_duplicates
+    }
 }
 
 /// One session's aggregated data.
@@ -348,6 +351,40 @@ pub struct SessionReport {
     pub sessions: Vec<SessionSummary>,
     pub malformed_lines: u64,
     pub unknown_models: BTreeMap<String, u64>,
+    /// Count of in-session dedup collisions where a second occurrence of
+    /// the same `message.id` carried a payload that disagreed with the
+    /// first (different timestamp / model / tokens). Mirrors
+    /// `Report::divergent_duplicates`; first-seen still wins in `totals`.
+    pub divergent_duplicates: u64,
+}
+
+/// Payload snapshot used to detect divergent in-session duplicates:
+/// two records sharing a `message.id` but disagreeing on any of these
+/// fields indicate log corruption. Mirrors the comparison done by
+/// `LocalAccumulator` for `daily` / `blocks`.
+#[derive(PartialEq)]
+struct SessionDupKey {
+    ts: DateTime<Utc>,
+    model: String,
+    input: u64,
+    output: u64,
+    cache_5m: u64,
+    cache_1h: u64,
+    cache_read: u64,
+}
+
+impl SessionDupKey {
+    fn from_record(r: &Record) -> Self {
+        Self {
+            ts: r.timestamp,
+            model: r.model.clone(),
+            input: r.input_tokens,
+            output: r.output_tokens,
+            cache_5m: r.cache_creation_5m_tokens,
+            cache_1h: r.cache_creation_1h_tokens,
+            cache_read: r.cache_read_tokens,
+        }
+    }
 }
 
 /// Aggregate one file into a SessionSummary.
@@ -361,10 +398,10 @@ fn aggregate_one_session(
     path: &Path,
     filters: &Filters,
     source: Source,
-) -> (Option<SessionSummary>, u64, BTreeMap<String, u64>) {
+) -> (Option<SessionSummary>, u64, BTreeMap<String, u64>, u64) {
     let file = match File::open(path) {
         Ok(f) => f,
-        Err(_) => return (None, 0, BTreeMap::new()),
+        Err(_) => return (None, 0, BTreeMap::new(), 0),
     };
     let reader = BufReader::new(file);
     let mut parser = ParserState::new(source);
@@ -374,7 +411,8 @@ fn aggregate_one_session(
     let mut start: Option<DateTime<Utc>> = None;
     let mut end: Option<DateTime<Utc>> = None;
     let mut cwd_counts: HashMap<String, u64> = HashMap::new();
-    let mut seen_ids: HashSet<String> = HashSet::new();
+    let mut seen_ids: HashMap<String, SessionDupKey> = HashMap::new();
+    let mut divergent: u64 = 0;
 
     for line_result in reader.lines() {
         let Ok(line) = line_result else {
@@ -386,9 +424,17 @@ fn aggregate_one_session(
         }
         match parser.parse_line(&line) {
             Ok(Some(record)) => {
-                if !seen_ids.insert(record.message_id.clone()) {
-                    continue;
-                }
+                let key = SessionDupKey::from_record(&record);
+                use std::collections::hash_map::Entry;
+                match seen_ids.entry(record.message_id.clone()) {
+                    Entry::Vacant(slot) => slot.insert(key),
+                    Entry::Occupied(existing) => {
+                        if *existing.get() != key {
+                            divergent += 1;
+                        }
+                        continue;
+                    }
+                };
 
                 if let Some(cwd) = record.cwd.as_deref() {
                     *cwd_counts.entry(cwd.to_string()).or_insert(0) += 1;
@@ -430,7 +476,7 @@ fn aggregate_one_session(
     }
 
     if totals.records == 0 {
-        return (None, malformed, unknown_models);
+        return (None, malformed, unknown_models, divergent);
     }
 
     let primary_cwd = cwd_counts
@@ -455,12 +501,12 @@ fn aggregate_one_session(
     // Session-level filters: include/exclude the whole session as a unit.
     if let Some(since) = filters.since {
         if start_date < since {
-            return (None, malformed, unknown_models);
+            return (None, malformed, unknown_models, divergent);
         }
     }
     if let Some(until) = filters.until {
         if start_date > until {
-            return (None, malformed, unknown_models);
+            return (None, malformed, unknown_models, divergent);
         }
     }
     if let Some(needle) = filters.project_substring.as_deref() {
@@ -468,7 +514,7 @@ fn aggregate_one_session(
             .as_deref()
             .is_some_and(|cwd| cwd.contains(needle))
         {
-            return (None, malformed, unknown_models);
+            return (None, malformed, unknown_models, divergent);
         }
     }
 
@@ -488,6 +534,7 @@ fn aggregate_one_session(
         }),
         malformed,
         unknown_models,
+        divergent,
     )
 }
 
@@ -510,12 +557,14 @@ pub fn aggregate_sessions_source(
     let mut sessions = Vec::new();
     let mut malformed_lines = 0u64;
     let mut unknown_models: BTreeMap<String, u64> = BTreeMap::new();
+    let mut divergent_duplicates = 0u64;
 
-    for (summary, mal, unk) in results {
+    for (summary, mal, unk, div) in results {
         if let Some(s) = summary {
             sessions.push(s);
         }
         malformed_lines += mal;
+        divergent_duplicates += div;
         for (model, count) in unk {
             *unknown_models.entry(model).or_insert(0) += count;
         }
@@ -527,6 +576,7 @@ pub fn aggregate_sessions_source(
         sessions,
         malformed_lines,
         unknown_models,
+        divergent_duplicates,
     }
 }
 
@@ -1210,6 +1260,74 @@ mod tests {
         let r = aggregate_sessions(&[], &Filters::default());
         assert!(r.sessions.is_empty());
         assert_eq!(r.malformed_lines, 0);
+    }
+
+    #[test]
+    fn session_divergent_duplicates_are_counted() {
+        // Two records in the same session file share an id but disagree on
+        // tokens — simulates a corrupted session log. The counter must
+        // fire, first-seen must win in totals (records=1, input=100).
+        let tmp = tempfile::tempdir().unwrap();
+        let path = write_jsonl(
+            tmp.path(),
+            "sess.jsonl",
+            &[
+                &assistant(
+                    "x",
+                    "claude-opus-4-7",
+                    "2026-04-05T12:00:00Z",
+                    "/p",
+                    100,
+                    50,
+                ),
+                &assistant(
+                    "x",
+                    "claude-opus-4-7",
+                    "2026-04-05T12:00:00Z",
+                    "/p",
+                    999,
+                    999,
+                ),
+            ],
+        );
+        let r = aggregate_sessions(&[path], &Filters::default());
+        assert_eq!(r.sessions.len(), 1);
+        assert_eq!(r.sessions[0].totals.records, 1, "first-seen should win");
+        assert_eq!(r.sessions[0].totals.input_tokens, 100);
+        assert_eq!(r.divergent_duplicates, 1);
+    }
+
+    #[test]
+    fn session_byte_identical_duplicates_do_not_flag_divergence() {
+        // The same id appearing twice with identical payload is the
+        // expected harmless duplicate — must NOT trip the divergent
+        // counter.
+        let tmp = tempfile::tempdir().unwrap();
+        let path = write_jsonl(
+            tmp.path(),
+            "sess.jsonl",
+            &[
+                &assistant(
+                    "dup",
+                    "claude-opus-4-7",
+                    "2026-04-05T12:00:00Z",
+                    "/p",
+                    100,
+                    50,
+                ),
+                &assistant(
+                    "dup",
+                    "claude-opus-4-7",
+                    "2026-04-05T12:00:00Z",
+                    "/p",
+                    100,
+                    50,
+                ),
+            ],
+        );
+        let r = aggregate_sessions(&[path], &Filters::default());
+        assert_eq!(r.sessions[0].totals.records, 1);
+        assert_eq!(r.divergent_duplicates, 0);
     }
 
     #[test]

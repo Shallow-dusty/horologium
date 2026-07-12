@@ -617,6 +617,7 @@ mod tests {
             ],
             malformed_lines: 0,
             unknown_models: BTreeMap::new(),
+            divergent_duplicates: 0,
         }
     }
 

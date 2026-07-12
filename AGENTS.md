@@ -101,7 +101,7 @@ release profile：`lto = "thin"` + `codegen-units = 1` + `strip = "symbols"` + `
 
 ## 后续项（重构备忘）
 
-- **session 聚合的 dedup 语义分裂**（correctness，未修）：`daily` / `blocks` 走 `LocalAccumulator` + `PerIdSummary` map，碰撞检测 `divergent_duplicates`；`session` 走独立 `aggregate_one_session` + `HashSet`，**不检测 divergent**，`SessionReport` 也没有该字段。这是 session 后加时没复用 daily pipeline 的遗留。`ReportDiagnostics::divergent_duplicates` 默认返回 0 是这个分裂的临时遮盖。修复需让 session 走 `LocalAccumulator`，是语义改动，不在本轮纯结构重构范围内。
+- **session 聚合的 divergent 检测**（✅ 已修复 2026-07-12）：`sessions` 现在和 `daily` / `blocks` 一样检测同文件内同 `message.id` 但 payload 不一致的损坏，`SessionReport` 新增 `divergent_duplicates` 字段，表格底部和 JSON 模式 stderr 都会报 note。保留 `aggregate_one_session` 独立路径（session 是 per-file，跨文件去重无意义），只补 divergent 检测，未走 `LocalAccumulator`。
 - **`Now` vs `Windows` disclaimer 文案分叉**：两处 cost disclaimer 因语义不同（windows 是累计 cost + EstLimit，now 是剩余 cost）文案不同，未强行合并。可后续抽 `cost_disclaimer(mode, mult, scope)` 参数化。
 - **`Stat` hidden 子命令**：保留为脚本兼容别名，代码路径与顶层 `daily/sessions/blocks/windows` 共享底层，无重复。确认无脚本依赖后可删。
 - **`status` 的 `--source` 默认值**：当前 `status` 默认 Claude，其余默认 Codex。跨 agent 定位下"默认 agent"是个产品决策，待 Gemini 落地后重新评估是否需要 `configure` 里设全局默认 source。
