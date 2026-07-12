@@ -24,6 +24,11 @@ pub struct Record {
     pub cache_creation_5m_tokens: u64,
     pub cache_creation_1h_tokens: u64,
     pub cache_read_tokens: u64,
+    /// Present on Claude Code's final assistant snapshot (`end_turn`,
+    /// `tool_use`, …); absent on intermediate streaming snapshots and on
+    /// Codex token-count records. Used only to choose the most complete
+    /// row when one `message.id` appears multiple times.
+    pub stop_reason: Option<String>,
     pub cwd: Option<String>,
 }
 
@@ -44,6 +49,7 @@ struct RawMessage {
     id: Option<String>,
     model: Option<String>,
     usage: Option<RawUsage>,
+    stop_reason: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -200,6 +206,7 @@ impl ParserState {
                     cache_creation_5m_tokens: 0,
                     cache_creation_1h_tokens: 0,
                     cache_read_tokens: usage.cached_input_tokens,
+                    stop_reason: None,
                     cwd: self.codex_context.cwd.clone(),
                 }))
             }
@@ -273,6 +280,7 @@ fn parse_claude_line(line: &str) -> Result<Option<Record>> {
         },
         cache_creation_1h_tokens: cc_1h,
         cache_read_tokens: usage.cache_read_input_tokens,
+        stop_reason: msg.stop_reason,
         cwd: raw.cwd,
     }))
 }

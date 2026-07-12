@@ -81,7 +81,7 @@ fn format_diagnostics_notes<R: ReportDiagnostics>(report: &R) -> String {
             out.push('\n');
         }
         out.push_str(&format!(
-            "note: {} duplicate message.id(s) carried divergent payloads — kept first-seen (log may be corrupted)\n",
+            "note: {} duplicate message.id(s) carried incompatible request metadata — kept first-seen (possible id collision/log corruption)\n",
             report.divergent_duplicates(),
         ));
     }
@@ -542,7 +542,7 @@ mod tests {
         let mut r = sample_report();
         r.divergent_duplicates = 2;
         let s = format_table(&r);
-        assert!(s.contains("2 duplicate message.id(s) carried divergent payloads"));
+        assert!(s.contains("2 duplicate message.id(s) carried incompatible request metadata"));
     }
 
     #[test]

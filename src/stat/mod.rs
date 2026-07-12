@@ -327,7 +327,7 @@ fn emit_diagnostics_to_stderr<R: aggregate::ReportDiagnostics>(report: &R) {
     }
     if report.divergent_duplicates() > 0 {
         eprintln!(
-            "note: {} duplicate message.id(s) carried divergent payloads — kept first-seen (log may be corrupted)",
+            "note: {} duplicate message.id(s) carried incompatible request metadata — kept first-seen (possible id collision/log corruption)",
             report.divergent_duplicates(),
         );
     }

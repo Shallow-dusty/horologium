@@ -226,6 +226,7 @@ mod tests {
             cache_creation_5m_tokens: cc5m,
             cache_creation_1h_tokens: cc1h,
             cache_read_tokens: cr,
+            stop_reason: None,
             cwd: None,
         }
     }

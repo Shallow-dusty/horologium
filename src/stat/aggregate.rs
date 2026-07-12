@@ -1,26 +1,23 @@
 //! Per-day rollup of deduplicated usage records.
 //!
-//! Each rayon worker opens one JSONL file, parses each line, filters and
-//! prices the surviving records, and stores one `PerIdSummary` per
-//! `message.id` into a local map. The reduce phase unions the per-id maps
-//! (first-writer wins on collision), and only then do we fold into the
-//! final `BTreeMap<date, Totals>`.
+//! Each rayon worker opens JSONL files and first collapses Claude Code's
+//! intermediate/final snapshots by `message.id`: prefer a row carrying
+//! `stop_reason`, otherwise take the largest `output_tokens` value (the
+//! same policy used by CC Switch). Only the selected row is filtered,
+//! priced, and stored as a `PerIdSummary`; the reduce phase then unions
+//! per-id maps across files before bucketing into reports.
 //!
 //! Why two-phase instead of per-file-bucketed: dedup across files matters
-//! for correctness (Claude Code *shouldn't* write the same `message.id`
-//! to two JSONL files, but if it ever did — or if a file is accidentally
-//! duplicated by backup tooling — naive per-file aggregation would double
-//! count). Since per-id dedup happens before bucketing, the unknown-model
-//! warning counts stay consistent with the row counts.
+//! for backup / rsync copies. Compatible snapshots are resolved to the
+//! most complete row both within and across files, keeping unknown-model
+//! counts aligned with report rows and avoiding the old systematic
+//! first-snapshot undercount.
 //!
-//! Divergent duplicates: byte-identical duplicates are the expected shape,
-//! but a corrupted/merged corpus could produce two records sharing an id
-//! with different payloads. rayon's reduce ordering isn't deterministic,
-//! so which writer wins would silently depend on thread scheduling. We
-//! instead compare on every collision and count divergences in
-//! `Report::divergent_duplicates`; the first-seen summary still wins (so
-//! aggregates remain stable within a run), and the counter surfaces the
-//! anomaly via stderr.
+//! Divergent duplicates now mean a genuine incompatible id collision:
+//! model, input tokens, or cache-read tokens disagree. Expected streaming
+//! changes (output, stop_reason, timestamp, late cache-creation fields) do
+//! not increment the counter. Incompatible collisions preserve first-seen
+//! and remain visible via stderr for investigation.
 
 use super::pricing::{cost_for_record, is_silent_unknown, lookup};
 use super::record::{ParserState, Record};
@@ -76,11 +73,10 @@ pub struct Report {
     /// Model-id → count of unique records using that model. Token counts
     /// are still included in `rows`; only cost contribution is zero.
     pub unknown_models: BTreeMap<String, u64>,
-    /// Count of dedup collisions where a second occurrence of the same
-    /// `message.id` carried a payload that disagreed with the first
-    /// occurrence (different date / model / tokens). The first-seen copy
-    /// is kept in the totals; this counter exposes the anomaly so the
-    /// user can investigate the underlying log corruption.
+    /// Count of genuine id collisions where model, input tokens, or
+    /// cache-read tokens conflict. Expected intermediate/final streaming
+    /// snapshots are merged to the most complete row and do not count.
+    /// Incompatible collisions preserve first-seen for investigation.
     pub divergent_duplicates: u64,
 }
 
@@ -96,6 +92,97 @@ enum PriceState {
     SilentUnknown,
 }
 
+/// True when two rows are snapshots of the same billable request rather
+/// than a genuine id collision. Claude Code writes intermediate and final
+/// assistant snapshots under one `message.id`; output / stop_reason /
+/// timestamp differ, and cache-creation tokens may only materialize on
+/// the final row. Model, input, and cache-read are stable from request
+/// start, so they form the compatibility key.
+fn same_usage_identity(a: &Record, b: &Record) -> bool {
+    a.model == b.model
+        && a.input_tokens == b.input_tokens
+        && a.cache_read_tokens == b.cache_read_tokens
+}
+
+/// CC Switch-compatible snapshot preference: a final row carrying
+/// `stop_reason` beats an intermediate row; when both have (or both lack)
+/// it, the larger output count wins. Input/cache values are already equal
+/// because the caller first checks [`same_usage_identity`].
+fn candidate_is_better(existing: &Record, candidate: &Record) -> bool {
+    match (
+        existing.stop_reason.is_some(),
+        candidate.stop_reason.is_some(),
+    ) {
+        (false, true) => true,
+        (true, false) => false,
+        _ => candidate.output_tokens > existing.output_tokens,
+    }
+}
+
+#[derive(Default)]
+struct ParsedFile {
+    records: Vec<Record>,
+    malformed: u64,
+    divergent: u64,
+}
+
+/// Parse one JSONL file and collapse Claude Code's intermediate/final
+/// snapshots before aggregation. Expected streaming snapshots are merged
+/// silently; incompatible rows sharing an id keep first-seen and increment
+/// `divergent` so genuine collisions remain visible.
+fn read_selected_records(path: &Path, source: Source) -> ParsedFile {
+    let file = match File::open(path) {
+        Ok(file) => file,
+        Err(_) => return ParsedFile::default(),
+    };
+    let mut parser = ParserState::new(source);
+    let mut per_id: HashMap<String, Record> = HashMap::new();
+    let mut malformed = 0u64;
+    let mut divergent = 0u64;
+
+    for line_result in BufReader::new(file).lines() {
+        let Ok(line) = line_result else {
+            malformed += 1;
+            continue;
+        };
+        if line.is_empty() {
+            continue;
+        }
+        let record = match parser.parse_line(&line) {
+            Ok(Some(record)) => record,
+            Ok(None) => continue,
+            Err(_) => {
+                malformed += 1;
+                continue;
+            }
+        };
+
+        use std::collections::hash_map::Entry;
+        match per_id.entry(record.message_id.clone()) {
+            Entry::Vacant(slot) => {
+                slot.insert(record);
+            }
+            Entry::Occupied(mut existing) => {
+                if same_usage_identity(existing.get(), &record) {
+                    if candidate_is_better(existing.get(), &record) {
+                        existing.insert(record);
+                    }
+                } else {
+                    divergent += 1;
+                    // Genuine collision / inconsistent request metadata:
+                    // preserve first-seen and surface the anomaly.
+                }
+            }
+        }
+    }
+
+    ParsedFile {
+        records: per_id.into_values().collect(),
+        malformed,
+        divergent,
+    }
+}
+
 /// A single-record contribution keyed by `message.id`. Kept whole through
 /// the reduce phase so dedup is authoritative before bucket aggregation
 /// and warning counts line up with row counts.
@@ -106,6 +193,23 @@ struct PerIdSummary {
     totals: Totals, // records=1 when filled from a live Record
     model_id: String,
     price_state: PriceState,
+    stop_reason_present: bool,
+}
+
+impl PerIdSummary {
+    fn same_usage_identity(&self, other: &Self) -> bool {
+        self.model_id == other.model_id
+            && self.totals.input_tokens == other.totals.input_tokens
+            && self.totals.cache_read_tokens == other.totals.cache_read_tokens
+    }
+
+    fn candidate_is_better(&self, candidate: &Self) -> bool {
+        match (self.stop_reason_present, candidate.stop_reason_present) {
+            (false, true) => true,
+            (true, false) => false,
+            _ => candidate.totals.output_tokens > self.totals.output_tokens,
+        }
+    }
 }
 
 #[derive(Default)]
@@ -156,6 +260,7 @@ impl LocalAccumulator {
             totals,
             model_id: record.model,
             price_state,
+            stop_reason_present: record.stop_reason.is_some(),
         };
 
         use std::collections::hash_map::Entry;
@@ -163,37 +268,26 @@ impl LocalAccumulator {
             Entry::Vacant(slot) => {
                 slot.insert(new_summary);
             }
-            Entry::Occupied(existing) => {
-                if *existing.get() != new_summary {
+            Entry::Occupied(mut existing) => {
+                if existing.get().same_usage_identity(&new_summary) {
+                    if existing.get().candidate_is_better(&new_summary) {
+                        existing.insert(new_summary);
+                    }
+                } else {
                     self.divergent_duplicates += 1;
+                    // Incompatible metadata under one id: preserve
+                    // first-seen and surface the anomaly.
                 }
-                // Byte-identical duplicates are silently dropped.
-                // Divergent duplicates: keep first-seen (stable within a
-                // run), surface the anomaly via the counter.
             }
         }
     }
 
     fn consume_file(&mut self, path: &Path, filters: &Filters, source: Source) {
-        let file = match File::open(path) {
-            Ok(f) => f,
-            Err(_) => return,
-        };
-        let reader = BufReader::new(file);
-        let mut parser = ParserState::new(source);
-        for line_result in reader.lines() {
-            let Ok(line) = line_result else {
-                self.malformed += 1;
-                continue;
-            };
-            if line.is_empty() {
-                continue;
-            }
-            match parser.parse_line(&line) {
-                Ok(Some(record)) => self.consume_record(record, filters),
-                Ok(None) => {}
-                Err(_) => self.malformed += 1,
-            }
+        let parsed = read_selected_records(path, source);
+        self.malformed += parsed.malformed;
+        self.divergent_duplicates += parsed.divergent;
+        for record in parsed.records {
+            self.consume_record(record, filters);
         }
     }
 
@@ -205,8 +299,12 @@ impl LocalAccumulator {
                 Entry::Vacant(slot) => {
                     slot.insert(summary);
                 }
-                Entry::Occupied(existing) => {
-                    if *existing.get() != summary {
+                Entry::Occupied(mut existing) => {
+                    if existing.get().same_usage_identity(&summary) {
+                        if existing.get().candidate_is_better(&summary) {
+                            existing.insert(summary);
+                        }
+                    } else {
                         self.divergent_duplicates += 1;
                     }
                 }
@@ -351,40 +449,10 @@ pub struct SessionReport {
     pub sessions: Vec<SessionSummary>,
     pub malformed_lines: u64,
     pub unknown_models: BTreeMap<String, u64>,
-    /// Count of in-session dedup collisions where a second occurrence of
-    /// the same `message.id` carried a payload that disagreed with the
-    /// first (different timestamp / model / tokens). Mirrors
-    /// `Report::divergent_duplicates`; first-seen still wins in `totals`.
+    /// Count of true id collisions whose model or request-side token
+    /// dimensions conflict. Expected intermediate/final streaming
+    /// snapshots are resolved before aggregation and do not increment it.
     pub divergent_duplicates: u64,
-}
-
-/// Payload snapshot used to detect divergent in-session duplicates:
-/// two records sharing a `message.id` but disagreeing on any of these
-/// fields indicate log corruption. Mirrors the comparison done by
-/// `LocalAccumulator` for `daily` / `blocks`.
-#[derive(PartialEq)]
-struct SessionDupKey {
-    ts: DateTime<Utc>,
-    model: String,
-    input: u64,
-    output: u64,
-    cache_5m: u64,
-    cache_1h: u64,
-    cache_read: u64,
-}
-
-impl SessionDupKey {
-    fn from_record(r: &Record) -> Self {
-        Self {
-            ts: r.timestamp,
-            model: r.model.clone(),
-            input: r.input_tokens,
-            output: r.output_tokens,
-            cache_5m: r.cache_creation_5m_tokens,
-            cache_1h: r.cache_creation_1h_tokens,
-            cache_read: r.cache_read_tokens,
-        }
-    }
 }
 
 /// Aggregate one file into a SessionSummary.
@@ -399,80 +467,49 @@ fn aggregate_one_session(
     filters: &Filters,
     source: Source,
 ) -> (Option<SessionSummary>, u64, BTreeMap<String, u64>, u64) {
-    let file = match File::open(path) {
-        Ok(f) => f,
-        Err(_) => return (None, 0, BTreeMap::new(), 0),
-    };
-    let reader = BufReader::new(file);
-    let mut parser = ParserState::new(source);
+    let parsed = read_selected_records(path, source);
+    let malformed = parsed.malformed;
+    let divergent = parsed.divergent;
     let mut totals = Totals::default();
-    let mut malformed: u64 = 0;
     let mut unknown_models: BTreeMap<String, u64> = BTreeMap::new();
     let mut start: Option<DateTime<Utc>> = None;
     let mut end: Option<DateTime<Utc>> = None;
     let mut cwd_counts: HashMap<String, u64> = HashMap::new();
-    let mut seen_ids: HashMap<String, SessionDupKey> = HashMap::new();
-    let mut divergent: u64 = 0;
 
-    for line_result in reader.lines() {
-        let Ok(line) = line_result else {
-            malformed += 1;
-            continue;
-        };
-        if line.is_empty() {
-            continue;
+    for record in parsed.records {
+        if let Some(cwd) = record.cwd.as_deref() {
+            *cwd_counts.entry(cwd.to_string()).or_insert(0) += 1;
         }
-        match parser.parse_line(&line) {
-            Ok(Some(record)) => {
-                let key = SessionDupKey::from_record(&record);
-                use std::collections::hash_map::Entry;
-                match seen_ids.entry(record.message_id.clone()) {
-                    Entry::Vacant(slot) => slot.insert(key),
-                    Entry::Occupied(existing) => {
-                        if *existing.get() != key {
-                            divergent += 1;
-                        }
-                        continue;
-                    }
-                };
-
-                if let Some(cwd) = record.cwd.as_deref() {
-                    *cwd_counts.entry(cwd.to_string()).or_insert(0) += 1;
-                }
-                match start {
-                    None => {
-                        start = Some(record.timestamp);
-                        end = Some(record.timestamp);
-                    }
-                    Some(s) => {
-                        if record.timestamp < s {
-                            start = Some(record.timestamp);
-                        }
-                        if record.timestamp > end.unwrap() {
-                            end = Some(record.timestamp);
-                        }
-                    }
-                }
-
-                let cost = match lookup(&record.model) {
-                    Some(row) => cost_for_record(&record, row),
-                    None if is_silent_unknown(&record.model) => 0.0,
-                    None => {
-                        *unknown_models.entry(record.model.clone()).or_insert(0) += 1;
-                        0.0
-                    }
-                };
-                totals.input_tokens += record.input_tokens;
-                totals.output_tokens += record.output_tokens;
-                totals.cache_creation_5m_tokens += record.cache_creation_5m_tokens;
-                totals.cache_creation_1h_tokens += record.cache_creation_1h_tokens;
-                totals.cache_read_tokens += record.cache_read_tokens;
-                totals.cost_usd += cost;
-                totals.records += 1;
+        match start {
+            None => {
+                start = Some(record.timestamp);
+                end = Some(record.timestamp);
             }
-            Ok(None) => {}
-            Err(_) => malformed += 1,
+            Some(s) => {
+                if record.timestamp < s {
+                    start = Some(record.timestamp);
+                }
+                if record.timestamp > end.unwrap() {
+                    end = Some(record.timestamp);
+                }
+            }
         }
+
+        let cost = match lookup(&record.model) {
+            Some(row) => cost_for_record(&record, row),
+            None if is_silent_unknown(&record.model) => 0.0,
+            None => {
+                *unknown_models.entry(record.model.clone()).or_insert(0) += 1;
+                0.0
+            }
+        };
+        totals.input_tokens += record.input_tokens;
+        totals.output_tokens += record.output_tokens;
+        totals.cache_creation_5m_tokens += record.cache_creation_5m_tokens;
+        totals.cache_creation_1h_tokens += record.cache_creation_1h_tokens;
+        totals.cache_read_tokens += record.cache_read_tokens;
+        totals.cost_usd += cost;
+        totals.records += 1;
     }
 
     if totals.records == 0 {
@@ -659,6 +696,21 @@ mod tests {
         )
     }
 
+    fn assistant_with_stop(
+        msg_id: &str,
+        model: &str,
+        ts: &str,
+        cwd: &str,
+        input: u64,
+        output: u64,
+        stop_reason: &str,
+    ) -> String {
+        format!(
+            r#"{{"type":"assistant","timestamp":"{}","cwd":"{}","message":{{"id":"{}","model":"{}","usage":{{"input_tokens":{},"output_tokens":{},"cache_creation_input_tokens":0,"cache_read_input_tokens":0}},"stop_reason":"{}"}}}}"#,
+            ts, cwd, msg_id, model, input, output, stop_reason
+        )
+    }
+
     fn codex_context(turn_id: &str, model: &str, cwd: &str) -> String {
         format!(
             r#"{{"timestamp":"2026-05-03T09:00:00Z","type":"turn_context","payload":{{"turn_id":"{}","cwd":"{}","model":"{}"}}}}"#,
@@ -719,6 +771,93 @@ mod tests {
         assert_eq!(r.rows[&d5].output_tokens, 1500);
         assert_eq!(r.rows[&d6].records, 1);
         assert_eq!(r.malformed_lines, 0);
+    }
+
+    #[test]
+    fn streaming_snapshots_prefer_final_stop_reason_without_divergence() {
+        let tmp = tempfile::tempdir().unwrap();
+        let intermediate = assistant(
+            "streamed",
+            "claude-opus-4-8",
+            "2026-04-05T12:00:00.100Z",
+            "/p",
+            16,
+            1,
+        );
+        let final_row = assistant_with_stop(
+            "streamed",
+            "claude-opus-4-8",
+            "2026-04-05T12:00:00.700Z",
+            "/p",
+            16,
+            71,
+            "end_turn",
+        );
+        let path = write_jsonl(tmp.path(), "stream.jsonl", &[&intermediate, &final_row]);
+
+        let r = aggregate_daily(&[path], &Filters::default());
+        let day = NaiveDate::from_ymd_opt(2026, 4, 5).unwrap();
+        assert_eq!(r.rows[&day].records, 1);
+        assert_eq!(r.rows[&day].output_tokens, 71);
+        assert_eq!(r.divergent_duplicates, 0);
+    }
+
+    #[test]
+    fn streaming_snapshots_without_stop_reason_take_max_output() {
+        let tmp = tempfile::tempdir().unwrap();
+        let early = assistant(
+            "streamed",
+            "claude-opus-4-8",
+            "2026-04-05T12:00:00.100Z",
+            "/p",
+            16,
+            1,
+        );
+        let later = assistant(
+            "streamed",
+            "claude-opus-4-8",
+            "2026-04-05T12:00:00.700Z",
+            "/p",
+            16,
+            71,
+        );
+        let path = write_jsonl(tmp.path(), "stream.jsonl", &[&early, &later]);
+
+        let sessions = aggregate_sessions(&[path], &Filters::default());
+        assert_eq!(sessions.sessions[0].totals.records, 1);
+        assert_eq!(sessions.sessions[0].totals.output_tokens, 71);
+        assert_eq!(sessions.divergent_duplicates, 0);
+    }
+
+    #[test]
+    fn streaming_final_snapshot_can_materialize_cache_creation() {
+        // Real Claude Code shape: the intermediate row has cache creation
+        // zero; the final `tool_use` row fills the flat cache-creation
+        // count. They are one request, not a divergent collision.
+        let tmp = tempfile::tempdir().unwrap();
+        let early = assistant(
+            "streamed-cache",
+            "claude-opus-4-6",
+            "2026-04-05T12:00:00.100Z",
+            "/p",
+            3,
+            1,
+        );
+        let final_row = r#"{"type":"assistant","timestamp":"2026-04-05T12:00:01.000Z","cwd":"/p","message":{"id":"streamed-cache","model":"claude-opus-4-6","usage":{"input_tokens":3,"output_tokens":148,"cache_creation_input_tokens":38131,"cache_read_input_tokens":71459,"cache_creation":{"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":0}},"stop_reason":"tool_use"}}"#;
+        // Match cache-read on the intermediate snapshot: request identity
+        // is model + input + cache-read; cache creation may arrive later.
+        let early = early.replace(
+            r#""cache_read_input_tokens":0"#,
+            r#""cache_read_input_tokens":71459"#,
+        );
+        let path = write_jsonl(tmp.path(), "stream.jsonl", &[&early, final_row]);
+
+        let r = aggregate_daily(&[path], &Filters::default());
+        let day = NaiveDate::from_ymd_opt(2026, 4, 5).unwrap();
+        assert_eq!(r.rows[&day].records, 1);
+        assert_eq!(r.rows[&day].output_tokens, 148);
+        assert_eq!(r.rows[&day].cache_creation_5m_tokens, 38_131);
+        assert_eq!(r.divergent_duplicates, 0);
     }
 
     #[test]
