@@ -15,10 +15,12 @@
 
 ## 当前阶段
 
+**当前发布版本：v2.2.1**（定价表更新 + Claude streaming snapshot 去重修复）。
+
 | Phase | 状态 | 说明 |
 |---|---|---|
-| 1 `status` | ✅ v1.1，dogfooding 中 | 全功能冷启动 <1 ms（bash 35 ms → ~45× 提速）。125+ 单测 + 50 parity snapshots |
-| 2 用量分析 | ✅ v2.1.0 | `daily` / `sessions` / `blocks` 覆盖 Claude + Codex JSONL |
+| 1 `status` | ✅ v1.1，dogfooding 中 | 全功能冷启动 <1 ms（bash 35 ms → ~45× 提速）。154 单测 + 50 parity snapshots |
+| 2 用量分析 | ✅ v2.1.0 完成；v2.2.1 修正 | `daily` / `sessions` / `blocks` 覆盖 Claude + Codex JSONL；定价与 streaming 去重口径已校正 |
 | 3 `configure` | ✅ TOML MVP | `~/.config/horologium/config.toml`，render 开关 / segment 顺序 / 阈值 |
 | 5 多 CLI 支持 | ✅ Codex MVP | `--source codex` 全命令支持；Gemini 待评估 |
 | 4 发布工程 | ⏳ | cargo-dist / 多平台产物 / install 脚本 |
@@ -118,6 +120,6 @@ release profile：`lto = "thin"` + `codegen-units = 1` + `strip = "symbols"` + `
 
 ## 未完事项备忘
 
-- 已发布：v1.0.0 / v1.1.0（Phase 1）、v2.0.0 / v2.0.1 / v2.0.2 / v2.1.0（Phase 2）均 push 至 `origin/main` 并建 GitHub Release
+- 已发布：v1.0.0 / v1.1.0（Phase 1）、v2.0.0 / v2.0.1 / v2.0.2 / v2.1.0（Phase 2）、v2.2.0（跨 Agent + 结构重构）、v2.2.1（定价 + streaming correctness）均 push 至 `origin/main` 并建 GitHub Release
 - 2 周 dogfooding 观测期进行中（起始 2026-04-23）；回退方案：`~/.backups/claude/statusline.sh.bash-v1.20260423.bak`
 - ratatui TUI、写入 `~/.claude/settings.json`、git-status widget、Gemini source 后续再评估

@@ -1,13 +1,13 @@
 [package]
 name = "horologium"
-version = "2.2.0"
+version = "2.2.1"
 edition = "2021"
 rust-version = "1.85"
-description = "Unified Claude Code status line and usage analytics in a single fast binary"
+description = "Cross-agent CLI status line and usage analytics in one fast binary"
 license = "MIT"
 repository = "https://github.com/Shallow-dusty/horologium"
 readme = "README.md"
-keywords = ["claude-code", "statusline", "cli", "usage", "tui"]
+keywords = ["agent-cli", "statusline", "usage", "claude-code", "codex"]
 categories = ["command-line-utilities"]
 
 [[bin]]

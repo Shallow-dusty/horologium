@@ -22,8 +22,10 @@ Horologium 做四件事：
 
 ## 当前状态
 
+**当前发布版本：v2.2.1**（定价表更新 + Claude streaming snapshot 去重修复）。
+
 - Phase 1 `status`：**v1.1 已完成 + dogfooding 中**。全功能模式冷启动 <1 ms（比 bash 35 ms 快 35×+）。
-- Phase 2 用量分析：**v2.1.0 已完成**。`daily` / `sessions` / `blocks` / `windows` / `now` 覆盖历史、会话、5h 块和 Codex rate-limit 窗口。
+- Phase 2 用量分析：**v2.1.0 完成，v2.2.1 修正定价与 streaming 去重口径**。`daily` / `sessions` / `blocks` / `windows` / `now` 覆盖历史、会话、5h 块和 Codex rate-limit 窗口。
 - Phase 3 `configure`：**TOML 配置 MVP 已实现**。支持生成/校验配置、调整渲染开关、segment 顺序/隐藏、Powerline 颜色和阈值。
 - Phase 5 `--source codex`：**Codex 兼容 MVP 已实现**。`status` / `daily` / `sessions` / `blocks` / `windows` / `now` 均可读 Codex session JSONL。
 

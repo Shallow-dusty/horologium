@@ -1,8 +1,8 @@
 # Horologium 是什么
 
-一句话：**Claude Code 生态里，把状态栏和用量分析合并到一个 Rust 二进制的工具。**
+一句话：**跨 Agent CLI（当前 Claude Code + Codex），把状态显示和本地用量分析合并到一个 Rust 二进制的工具。**
 
-`Horologium` 是拉丁语"时钟"，对应 Claude Code 的两个关键计时窗口：5 小时配额窗口 和 7 天配额窗口。
+`Horologium` 是拉丁语“时钟”，对应 Agent 订阅常见的 5 小时与 7 天配额窗口。
 
 ---
 
@@ -14,15 +14,15 @@ Claude Code 的 statusLine 是每条消息都会触发的热路径。社区主�
 
 Horologium 的 `status` 子命令用 Rust 写，**冷启动 <1 毫秒**——比 Node 方案快 1000 倍以上，比手写 bash 脚本（~35 ms）也快 35 倍。
 
-### 痛点 2：Max 订阅看不到历史用量
+### 痛点 2：跨会话历史与配额看不清
 
-Claude Code 2.1.118 的 `/usage` TUI 只显示**当前会话**的消耗。Max 订阅用户问不了这三件事：
+Agent CLI 自带界面通常聚焦当前会话或当前窗口，难以回答跨日期、跨项目的问题：
 
 - 我这周花了多少？
 - 哪个项目最烧钱？
 - 今天和昨天对比呢？
 
-Horologium 的 `daily` 子命令直接读本地的 `~/.claude/projects/**/*.jsonl`（Claude Code 自己写的会话日志），按日聚合、按项目过滤，给出完整的历史账单。**单二进制、零网络、零 Node 依赖。**
+Horologium 直接读取本地会话日志：Claude 默认 `~/.claude/projects/**/*.jsonl`，Codex 默认 `~/.codex/sessions/**/*.jsonl`。可按日、会话、5h 块或服务端限额窗口汇总。**单二进制、零网络、零 Node 依赖。**
 
 ---
 
@@ -52,6 +52,13 @@ Horologium 的 `daily` 子命令直接读本地的 `~/.claude/projects/**/*.json
 - 未识别模型 / 受损行 / 重复 ID 异常的诊断
 
 **过滤器**：`--since` / `--until` / `--project <子串>` / `--root <路径>` / `--json`（NDJSON 输出给 jq 用）
+
+其他报表命令：
+
+- `sessions`：按会话汇总，可用 `--sort-cost`
+- `blocks`：按本地时区固定 5h 块汇总
+- `windows [5h|7d]`：从 Codex `rate_limits` 反推窗口成本与限额
+- `now`：零输入显示当前 5h + 7d 的 used% / reset / 剩余 USD
 
 **性能**：本机 665 文件 / 517 MB / 14 天历史 → **58 毫秒**（rayon 8 核 7.4× 并行）
 
@@ -95,7 +102,7 @@ MCP 不属于这个目标；hooks 也不作为状态栏方案。后续只有在�
 |---|---|
 | **冷启动 <20 ms** | 状态栏实测 <1 ms，全功能模式也在亚毫秒 |
 | **单二进制** | 1 MB 左右，无运行时依赖，不装 Node/Python |
-| **定价表内嵌** | 21 个 Claude 模型的价格快照 4 KB 打进二进制，启动不联网 |
+| **定价表内嵌** | 24 个 Claude 模型的 LiteLLM 快照 + OpenAI/Codex 内置费率打进二进制，启动不联网 |
 | **零 Node 依赖** | 替代 ccusage / ccstatusline 的 Node 工具链 |
 | **跨文件 message-id 去重** | 备份或 rsync 副本不会让同一条消息被重复计费 |
 
@@ -103,8 +110,8 @@ MCP 不属于这个目标；hooks 也不作为状态栏方案。后续只有在�
 
 ## 适合谁
 
-- **Claude Code 的 Max 订阅用户**：想知道过去几天/几周花了多少
-- **想要更快状态栏的人**：从 bash statusline 或 ccstatusline 迁移
+- **Claude Code / Codex 用户**：想知道过去几天、会话或窗口用了多少
+- **Claude Code 状态栏用户**：从 bash statusline 或 ccstatusline 迁移到亚毫秒热路径
 - **把 AI 账单纳入 CI 观测的团队**：`--json` 管道能直接 scrape 到 Prometheus / Grafana
 
 ---
