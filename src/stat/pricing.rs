@@ -50,6 +50,12 @@ const GPT_5_5: PricingRow = PricingRow {
     cache_read_per_mtok: 0.50,
 };
 
+// GPT-5.6 Sol is the flagship of the GPT-5.6 family (GA 2026-07-09). Same
+// public API rates as GPT-5.5 ($5 input / $30 output / $0.50 cached read
+// per 1M tokens). Kept as a separate const so a future rate change only
+// touches this row.
+const GPT_5_6_SOL: PricingRow = GPT_5_5;
+
 const GPT_5_4: PricingRow = PricingRow {
     input_per_mtok: 2.50,
     output_per_mtok: 15.00,
@@ -121,13 +127,43 @@ pub fn lookup(model_id: &str) -> Option<&'static PricingRow> {
     if let Some(row) = lookup_openai(normalized) {
         return Some(row);
     }
-    table().get(normalized)
+    if let Some(row) = table().get(normalized) {
+        return Some(row);
+    }
+    // Fallback: try known Claude alias variants — thinking suffix, dated
+    // names, and period-separated versions all map to a canonical id
+    // already present in the LiteLLM snapshot.
+    let canonical = claude_alias(normalized);
+    table().get(canonical.as_str())
+}
+
+/// Map a Claude model id variant to its canonical LiteLLM name. Covers:
+/// - `<base>-thinking` -> `<base>` (Claude Code emits a `-thinking`
+///   suffix for thinking-mode rows; billed at the base rate — Anthropic
+///   doesn't break out a thinking surcharge).
+/// - `claude-5-fable-20260609` -> `claude-fable-5` (old dated alias).
+/// - Period-separated versions like `claude-opus-4.8` -> `claude-opus-4-8`
+///   (legacy Claude Code form; LiteLLM uses hyphens). Only applied as a
+///   fallback after the exact-id lookup missed, so canonical ids are
+///   unaffected.
+fn claude_alias(id: &str) -> String {
+    if id == "claude-5-fable-20260609" {
+        return "claude-fable-5".to_string();
+    }
+    if let Some(base) = id.strip_suffix("-thinking") {
+        return base.to_string();
+    }
+    if id.starts_with("claude-") && id.contains('.') {
+        return id.replace('.', "-");
+    }
+    id.to_string()
 }
 
 fn lookup_openai(model_id: &str) -> Option<&'static PricingRow> {
     let model_id = model_id.strip_prefix("openai/").unwrap_or(model_id);
     match model_id.to_ascii_lowercase().as_str() {
         "gpt-5.5" => Some(&GPT_5_5),
+        "gpt-5.6-sol" => Some(&GPT_5_6_SOL),
         "gpt-5.4" => Some(&GPT_5_4),
         "gpt-5.4-mini" | "gpt-5.4 mini" => Some(&GPT_5_4_MINI),
         "gpt-5.3-codex" | "gpt-5.2" => Some(&GPT_5_3_CODEX),
@@ -153,6 +189,10 @@ fn normalize_model_id(model_id: &str) -> &str {
 const SILENT_UNKNOWN_MODELS: &[&str] = &[
     // Claude Code's sentinel for tool-use / synthetic assistant rows.
     "<synthetic>",
+    // Codex `token_count` events that arrive before any `turn_context` (or
+    // from sessions with no model context) get a fallback id from
+    // `record.rs`; these are not billable and not worth a warning.
+    "codex-unknown",
 ];
 
 /// True when `model_id` is a known non-billable sentinel (no cost, no warning).
@@ -299,6 +339,7 @@ mod tests {
     #[test]
     fn silent_unknown_matches_synthetic_only() {
         assert!(is_silent_unknown("<synthetic>"));
+        assert!(is_silent_unknown("codex-unknown"));
         assert!(!is_silent_unknown("claude-opus-4-7"));
         assert!(!is_silent_unknown("claude-mystery-99"));
         assert!(!is_silent_unknown(""));
@@ -339,5 +380,53 @@ mod tests {
         let row = lookup("claude-opus-4-1").expect("claude-opus-4-1 missing");
         assert!((row.input_per_mtok - 15.0).abs() < 1e-6);
         assert!((row.output_per_mtok - 75.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn gpt_5_6_sol_priced_same_as_5_5() {
+        let sol = lookup("gpt-5.6-sol").expect("gpt-5.6-sol must be priced");
+        let five5 = lookup("gpt-5.5").unwrap();
+        assert!((sol.input_per_mtok - 5.0).abs() < 1e-6);
+        assert!((sol.output_per_mtok - 30.0).abs() < 1e-6);
+        assert!((sol.cache_read_per_mtok - 0.50).abs() < 1e-6);
+        assert!((sol.input_per_mtok - five5.input_per_mtok).abs() < 1e-9);
+    }
+
+    #[test]
+    fn claude_thinking_variant_maps_to_base() {
+        // Claude Code emits a `-thinking` suffix for thinking-mode rows;
+        // it must price at the base model's rate, not vanish into
+        // unknown_models. Applies generically across the Opus/Sonnet
+        // line, not just one hardcoded id.
+        for (variant, base) in [
+            ("claude-opus-4-5-thinking", "claude-opus-4-5"),
+            ("claude-opus-4-6-thinking", "claude-opus-4-6"),
+            ("claude-sonnet-4-5-thinking", "claude-sonnet-4-5"),
+        ] {
+            let row = lookup(variant).unwrap_or_else(|| panic!("{} must price", variant));
+            let base_row = lookup(base).unwrap();
+            assert!(
+                (row.input_per_mtok - base_row.input_per_mtok).abs() < 1e-9,
+                "{} should match {}",
+                variant,
+                base
+            );
+        }
+    }
+
+    #[test]
+    fn claude_dated_fable_alias_maps_to_canonical() {
+        let row = lookup("claude-5-fable-20260609").expect("dated fable alias must price");
+        let base = lookup("claude-fable-5").unwrap();
+        assert!((row.input_per_mtok - base.input_per_mtok).abs() < 1e-9);
+    }
+
+    #[test]
+    fn claude_period_version_maps_to_hyphen() {
+        // Legacy Claude Code form `claude-opus-4.8` (period) must map to
+        // the LiteLLM hyphen form `claude-opus-4-8`.
+        let row = lookup("claude-opus-4.8").expect("period-version must price");
+        let base = lookup("claude-opus-4-8").unwrap();
+        assert!((row.input_per_mtok - base.input_per_mtok).abs() < 1e-9);
     }
 }

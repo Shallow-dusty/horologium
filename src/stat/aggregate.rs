@@ -487,11 +487,21 @@ fn aggregate_one_session(
     let project = primary_cwd
         .as_deref()
         .map(|cwd| {
-            std::path::Path::new(cwd)
+            // Try POSIX file_name first; fall back to splitting on Windows
+            // `\` so paths like `D:\Scoop\persist\foo` (recorded on a
+            // Windows Claude Code host) collapse to `foo` when parsed on
+            // Linux. Without this, `Path::file_name` returns the whole
+            // string (no `/` present) and the full path leaks into the
+            // Project column.
+            if let Some(name) = std::path::Path::new(cwd)
                 .file_name()
                 .and_then(|s| s.to_str())
-                .unwrap_or(cwd)
-                .to_string()
+            {
+                if name != cwd {
+                    return name.to_string();
+                }
+            }
+            cwd.rsplit(['\\', '/']).next().unwrap_or(cwd).to_string()
         })
         .unwrap_or_default();
 

@@ -105,6 +105,10 @@ release profile：`lto = "thin"` + `codegen-units = 1` + `strip = "symbols"` + `
 - **`Stat` hidden 子命令**（✅ 2026-07-12 删除）：原为脚本兼容别名（thin wrapper，零逻辑重复），跨 agent 定位下 `stat` namespace 暗示 Claude Code 专属，与跨 agent 定位冲突。项目内无脚本依赖（仅 status.rs 一处引导文案 + 文档引用），删除。属 breaking CLI change，需版本 bump。
 - **`status` 默认 Claude、其余默认 Codex**（已决策，保留）：`status` 主用例是 Claude Code `settings.json` 的 statusLine 集成（stdin JSON 来自 CC），默认 Claude 对齐主用例；`daily`/`sessions`/`blocks`/`windows`/`now` 主用例是 Codex 配额监控（Codex 才有 rate-limit 字段、Max 订阅不计费），默认 Codex 对齐主用例。每个命令的默认 source 对齐它自己的主用例，比“全局统一一个默认”更合理——强行统一会让某个主用例必须显式 `--src`，是 regression。跨 agent 切换用 `--src` 即可，无需 `configure` 全局 source（YAGNI，等真有频繁切换痛点再加）。
 
+## 已知数据问题（待产品决策）
+
+- **divergent duplicates 大部分是 Claude Code streaming 增量，非真损坏**（2026-07-12 调研）：dogfooding 发现 Claude 日志报 1307 divergent，但跨文件重复 id 仅 104 个（82 payload 不同）。抽样显示主流模式是同 model 同 timestamp 但 `output` 不同（1 vs 90 / 1 vs 211）——Claude Code 的 streaming 写入（生成中途 output=1，完成时 output=N）。当前 first-seen 策略可能保留 streaming 早期版（output 小），**低估 cost**；warning 文案“log may be corrupted”对 streaming 场景误导。待决策：(a) 保留 first-seen + 改文案为中性；(b) divergent 时取 max output（乐观，假设最终版 output 最大）；(c) 区分“同 model 仅 output 不同”取 max vs “model 不同”报警。不擅自改 behavior，属 cost 计算口径变更，需用户拍板。
+
 ## 参考资料
 
 - Claude Code statusline 官方文档: https://code.claude.com/docs/en/statusline
