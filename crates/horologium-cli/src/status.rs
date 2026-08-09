@@ -14,7 +14,7 @@ use std::io::{IsTerminal, Read};
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::source::Source;
+use horologium_core::source::Source;
 
 #[derive(Args)]
 pub struct StatusArgs {
@@ -283,7 +283,7 @@ fn apply_codex_token_info(data: &mut Input, info: serde_json::Value) -> Result<(
 }
 
 fn codex_usage_cost(model: &str, usage: &CodexUsage) -> Option<f64> {
-    let row = crate::stat::pricing::lookup(model)?;
+    let row = horologium_core::pricing::lookup(model)?;
     let m = 1_000_000.0;
     let uncached_input = usage.input_tokens.saturating_sub(usage.cached_input_tokens);
     Some(

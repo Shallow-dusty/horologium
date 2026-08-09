@@ -1,6 +1,6 @@
 //! `horologium now` — zero-input snapshot of the current 5h and 7d
 //! rate-limit windows: used %, time until reset, and a remaining USD
-//! estimate. Backed by [`crate::stat::windows::aggregate`].
+//! estimate. Backed by [`horologium_core::windows::aggregate`].
 
 use std::path::PathBuf;
 
@@ -8,8 +8,8 @@ use anyhow::{anyhow, Result};
 use chrono::{TimeZone, Utc};
 use clap::Args;
 
-use crate::source::Source;
-use crate::stat::windows::{self, CostMode, Tier, Window};
+use horologium_core::source::Source;
+use horologium_core::windows::{self, CostMode, Tier, Window};
 
 #[derive(Args)]
 pub struct NowArgs {
@@ -46,7 +46,7 @@ pub fn run(args: NowArgs) -> Result<()> {
         .clone()
         .or_else(|| args.source.default_root())
         .ok_or_else(|| anyhow!("$HOME not set; pass --root explicitly"))?;
-    let paths = crate::stat::walker_find_jsonl(&root);
+    let paths = horologium_core::walker::find_jsonl(&root);
 
     if !root.exists() {
         eprintln!(
@@ -126,7 +126,7 @@ fn emit_table(cur_5h: &Option<Window>, cur_7d: &Option<Window>, mode: CostMode) 
         .collect();
     print!(
         "{}",
-        crate::stat::format::align_table(&headers, &body, None)
+        horologium_core::format::align_table(&headers, &body, None)
     );
 }
 

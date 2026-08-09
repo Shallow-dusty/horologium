@@ -31,28 +31,33 @@
 ## 目录结构
 
 ```
-src/
-├── main.rs          # clap 分派；顶层命令
-├── status.rs        # Phase 1: 状态栏渲染（stdin JSON → ANSI 行）
-├── git.rs           # .git/HEAD + origin URL 手写解析（worktree-aware，零依赖）
-├── source.rs        # Claude / Codex source enum + default_root
-├── now.rs           # `now`: 当前 5h+7d 窗口快照（零输入）
-├── config.rs        # Phase 3: TOML 配置 + `configure` CLI
-└── stat/            # Phase 2/5: 用量分析
-    ├── mod.rs       # CLI + dispatch + CommonArgs + 共享 helpers
-    ├── walker.rs    # 递归扫 .jsonl
-    ├── record.rs    # JSONL 行 → Record（Claude / Codex 双 schema）
-    ├── pricing.rs   # 嵌入 LiteLLM 快照 + OpenAI 内置费率 + cost 算法
-    ├── aggregate.rs # rayon fold/reduce + 跨文件 dedup + Report 类型 + ReportDiagnostics trait
-    ├── windows.rs   # Codex rate-limit 窗口聚合（5h/7d，Tier/CostMode ValueEnum）
-    └── format.rs    # align_table + format_diagnostics_notes + 各 report 的 table/NDJSON
-data/
-└── litellm-anthropic-pricing.json   # Anthropic 定价源（gen-pricing.py regen）
+crates/
+├── horologium-core/         # harness 无关核心库（lib，可被外部 adapter 引用）
+│   ├── src/
+│   │   ├── lib.rs           # 模块声明 + crate 级文档
+│   │   ├── source.rs        # Claude / Codex source enum + default_root
+│   │   ├── walker.rs        # 递归扫 .jsonl
+│   │   ├── record.rs        # JSONL 行 → Record（Claude / Codex 双 schema）
+│   │   ├── pricing.rs       # 嵌入 LiteLLM 快照 + cost 算法
+│   │   ├── aggregate.rs     # rayon fold/reduce + 跨文件 dedup + Report 类型 + ReportDiagnostics trait
+│   │   ├── windows.rs       # Codex rate-limit 窗口聚合（5h/7d，Tier/CostMode ValueEnum）
+│   │   └── format.rs        # align_table + format_diagnostics_notes + 各 report 的 table/NDJSON
+│   └── data/
+│       └── litellm-anthropic-pricing.json  # 定价源（gen-pricing.py regen）
+└── horologium-cli/          # CLI 薄壳（bin: horologium）
+    └── src/
+        ├── main.rs          # clap 分派；顶层命令
+        ├── status.rs        # Phase 1: 状态栏渲染（stdin JSON → ANSI 行）
+        ├── git.rs           # .git/HEAD + origin URL 手写解析（worktree-aware，零依赖）
+        ├── now.rs           # `now`: 当前 5h+7d 窗口快照（零输入）
+        ├── config.rs        # Phase 3: TOML 配置 + `configure` CLI
+        └── stat.rs          # stat 系命令的 CLI args + dispatch（CommonArgs + 共享 helpers）
 scripts/
-└── gen-pricing.py                   # 从 LiteLLM full JSON 生成 slim 快照
+└── gen-pricing.py           # 从 LiteLLM full JSON 生成 slim 快照（输出到 core/data/）
 docs/
 ├── roadmap.md       # 路线图 + 决策日志
-└── intro.md         # 入门页
+├── intro.md         # 入门页
+└── pi-integration-design.md # Pi 集成设计稿
 tests/parity/        # snapshot harness（10 fixtures × 5 modes = 50 cases）
 ```
 
@@ -74,6 +79,7 @@ horologium configure ...   # TOML 配置管理
 
 ## 架构约定
 
+- **Workspace 分层**：`horologium-core`（harness 无关：source/walker/record/pricing/aggregate/windows/format）+ `horologium-cli`（bin 薄壳）。外部 adapter（如 Horologium-Pi）直接依赖 core crate，不复制逻辑。core 带 clap 依赖只为 `Tier`/`CostMode` 的 `ValueEnum` derive（刻意，不加包装层）
 - **每加一个子命令 = 一个独立 module**（不往 main.rs 塞逻辑）
 - **CLI arg 复用**：`daily` / `sessions` / `blocks` 共享 `CommonArgs`（flatten）；`windows` 因不接受 `--since/--until/--project` 而独立
 - **表格渲染统一走 `format::align_table`**（header + body + optional total），5 个 table 函数复用；`now` 也复用（传 `total = None`）

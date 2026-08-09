@@ -270,12 +270,25 @@ dependencies = [
  "anyhow",
  "chrono",
  "clap",
+ "horologium-core",
  "owo-colors",
- "rayon",
  "serde",
  "serde_json",
  "tempfile",
  "toml",
+]
+
+[[package]]
+name = "horologium-core"
+version = "2.2.1"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "clap",
+ "rayon",
+ "serde",
+ "serde_json",
+ "tempfile",
 ]
 
 [[package]]

@@ -7,7 +7,7 @@ Usage:
 Regeneration workflow:
     curl -sS -o /tmp/litellm.json \\
       https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json
-    python3 scripts/gen-pricing.py /tmp/litellm.json data/litellm-anthropic-pricing.json
+    python3 scripts/gen-pricing.py /tmp/litellm.json crates/horologium-core/data/litellm-anthropic-pricing.json
 
 Filters:
 - Only bare `claude-*` keys (drops AWS/Vertex/OpenRouter-routed variants

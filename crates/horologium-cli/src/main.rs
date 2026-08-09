@@ -4,7 +4,6 @@ use clap::{Parser, Subcommand};
 mod config;
 mod git;
 mod now;
-mod source;
 mod stat;
 mod status;
 

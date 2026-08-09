@@ -1,32 +1,25 @@
-[package]
-name = "horologium"
-version = "2.2.1"
+[workspace]
+resolver = "2"
+members = ["crates/horologium-core", "crates/horologium-cli"]
+
+[workspace.package]
 edition = "2021"
 rust-version = "1.85"
-description = "Cross-agent CLI status line and usage analytics in one fast binary"
 license = "MIT"
 repository = "https://github.com/Shallow-dusty/horologium"
-readme = "README.md"
-keywords = ["agent-cli", "statusline", "usage", "claude-code", "codex"]
-categories = ["command-line-utilities"]
 
-[[bin]]
-name = "horologium"
-path = "src/main.rs"
-
-[dependencies]
+[workspace.dependencies]
+anyhow = "1"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 clap = { version = "4.5", features = ["derive"] }
+owo-colors = "4"
+rayon = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-anyhow = "1"
-owo-colors = "4"
-chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
-rayon = "1"
 toml = "0.8"
-
-[dev-dependencies]
 tempfile = "3"
 
+# Release profile must live at the workspace root.
 [profile.release]
 lto = "thin"
 codegen-units = 1

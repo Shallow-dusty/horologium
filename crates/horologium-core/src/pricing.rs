@@ -27,12 +27,12 @@
 //!   1h/5m is 1.6, not 2). LiteLLM does not publish this column, so we
 //!   derive it from `input_cost_per_token`.
 
-use crate::stat::record::Record;
+use crate::record::Record;
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
-const EMBEDDED_SNAPSHOT: &str = include_str!("../../data/litellm-anthropic-pricing.json");
+const EMBEDDED_SNAPSHOT: &str = include_str!("../data/litellm-anthropic-pricing.json");
 
 pub struct PricingRow {
     pub input_per_mtok: f64,

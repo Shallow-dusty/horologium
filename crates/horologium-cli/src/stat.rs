@@ -7,13 +7,10 @@
 //! session / 5-hour block, multiply token counts against a built-in
 //! pricing table, and print a table or NDJSON rollup.
 //!
-//! Module layout:
-//! - `walker`    — discover JSONL files under the logs root
-//! - `record`    — parse a line into a normalized `Record`
-//! - `pricing`   — embedded pricing table + cost lookup
-//! - `aggregate` — rayon-driven per-file fold into report structs
-//! - `windows`   — Codex rate-limit window aggregation (5h / 7d)
-//! - `format`    — render table or NDJSON
+//! This module is only the CLI shell: argument shapes + dispatch. All
+//! parsing / pricing / aggregation / rendering lives in the
+//! `horologium-core` crate (`walker`, `record`, `pricing`, `aggregate`,
+//! `windows`, `format`).
 //!
 //! CLI arg shape: `daily` / `sessions` / `blocks` all share [`CommonArgs`]
 //! (flattened in), so `build_filters` / `resolve_root` take one input.
@@ -26,21 +23,8 @@ use chrono::NaiveDate;
 use clap::Args;
 use std::path::PathBuf;
 
-use crate::source::Source;
-
-mod aggregate;
-pub(crate) mod format;
-pub(crate) mod pricing;
-mod record;
-mod walker;
-pub mod windows;
-
-/// Re-export for sibling modules (e.g. `crate::now`) that need to discover
-/// JSONL files under a custom root without depending on the private
-/// `walker` module directly.
-pub fn walker_find_jsonl(root: &std::path::Path) -> Vec<PathBuf> {
-    walker::find_jsonl(root)
-}
+use horologium_core::source::Source;
+use horologium_core::{aggregate, format, walker, windows};
 
 // ---- shared CLI args ---------------------------------------------------
 

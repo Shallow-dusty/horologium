@@ -1,0 +1,28 @@
+[package]
+name = "horologium"
+version = "2.2.1"
+description = "Cross-agent CLI status line and usage analytics in one fast binary"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+readme = "../../README.md"
+keywords = ["agent-cli", "statusline", "usage", "claude-code", "codex"]
+categories = ["command-line-utilities"]
+
+[[bin]]
+name = "horologium"
+path = "src/main.rs"
+
+[dependencies]
+horologium-core = { path = "../horologium-core", version = "2.2.1" }
+anyhow.workspace = true
+chrono.workspace = true
+clap.workspace = true
+owo-colors.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+toml.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

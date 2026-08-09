@@ -6,8 +6,8 @@
 //! to the widest cell so rollups from small to production-scale corpora
 //! all align without wrapping.
 
-use super::aggregate::{BlockReport, Report, ReportDiagnostics, SessionReport};
-use super::windows::{CostMode, Window, WindowsReport};
+use crate::aggregate::{BlockReport, Report, ReportDiagnostics, SessionReport};
+use crate::windows::{CostMode, Window, WindowsReport};
 
 /// Render a monospace-aligned table from pre-built cell strings.
 ///
@@ -17,11 +17,7 @@ use super::windows::{CostMode, Window, WindowsReport};
 /// Column 0 is left-aligned; the rest are right-aligned and prefixed
 /// with two spaces — matching the legacy hand-rolled renderers
 /// byte-for-byte so existing parity snapshots stay green.
-pub(crate) fn align_table(
-    headers: &[&str],
-    body: &[Vec<String>],
-    total: Option<&Vec<String>>,
-) -> String {
+pub fn align_table(headers: &[&str], body: &[Vec<String>], total: Option<&Vec<String>>) -> String {
     let mut widths: Vec<usize> = headers.iter().map(|h| h.len()).collect();
     for row in body.iter().chain(total) {
         for (i, cell) in row.iter().enumerate() {
@@ -164,8 +160,8 @@ pub fn format_table(report: &Report) -> String {
     out
 }
 
-fn total_of(report: &Report) -> super::aggregate::Totals {
-    let mut t = super::aggregate::Totals::default();
+fn total_of(report: &Report) -> crate::aggregate::Totals {
+    let mut t = crate::aggregate::Totals::default();
     for row in report.rows.values() {
         t.input_tokens += row.input_tokens;
         t.output_tokens += row.output_tokens;
@@ -217,7 +213,7 @@ pub fn format_blocks_table(report: &BlockReport) -> String {
         ]);
     }
 
-    let mut total = super::aggregate::Totals::default();
+    let mut total = crate::aggregate::Totals::default();
     for t in report.rows.values() {
         total.input_tokens += t.input_tokens;
         total.output_tokens += t.output_tokens;
@@ -341,7 +337,7 @@ pub fn format_windows_table(report: &WindowsReport, mode: CostMode) -> String {
             .unwrap_or_else(|| "—".to_string());
         let mut row = vec![
             tier.to_string(),
-            super::windows::fmt_ts(w.resets_at),
+            crate::windows::fmt_ts(w.resets_at),
             w.first_observed.format("%m-%d %H:%M").to_string(),
             w.last_observed.format("%m-%d %H:%M").to_string(),
             format!("{:.1}%", w.max_used_percent),
@@ -422,7 +418,7 @@ pub fn format_sessions_table(report: &SessionReport) -> String {
     }
 
     // TOTAL row
-    let mut total = super::aggregate::Totals::default();
+    let mut total = crate::aggregate::Totals::default();
     for s in &report.sessions {
         total.input_tokens += s.totals.input_tokens;
         total.output_tokens += s.totals.output_tokens;
@@ -472,7 +468,7 @@ pub fn format_sessions_ndjson(report: &SessionReport) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::stat::aggregate::{Report, SessionReport, SessionSummary, Totals};
+    use crate::aggregate::{Report, SessionReport, SessionSummary, Totals};
     use chrono::{NaiveDate, TimeZone, Utc};
     use std::collections::BTreeMap;
 
@@ -678,7 +674,7 @@ mod tests {
         assert_eq!(format_sessions_ndjson(&r), "");
     }
 
-    use crate::stat::aggregate::{BlockKey, BlockReport};
+    use crate::aggregate::{BlockKey, BlockReport};
 
     fn sample_block_report() -> BlockReport {
         let d = NaiveDate::from_ymd_opt(2026, 4, 23).unwrap();

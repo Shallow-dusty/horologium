@@ -330,7 +330,7 @@ pub fn aggregate(
         }
     }
 
-    let pricing_row = crate::stat::pricing::lookup("gpt-5.5");
+    let pricing_row = crate::pricing::lookup("gpt-5.5");
     let windows: Vec<Window> = windows
         .into_iter()
         .map(|(reset_at, acc)| {

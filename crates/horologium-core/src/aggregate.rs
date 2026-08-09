@@ -19,8 +19,8 @@
 //! not increment the counter. Incompatible collisions preserve first-seen
 //! and remain visible via stderr for investigation.
 
-use super::pricing::{cost_for_record, is_silent_unknown, lookup};
-use super::record::{ParserState, Record};
+use crate::pricing::{cost_for_record, is_silent_unknown, lookup};
+use crate::record::{ParserState, Record};
 use crate::source::Source;
 use chrono::{DateTime, Local, NaiveDate, Timelike, Utc};
 use rayon::prelude::*;
