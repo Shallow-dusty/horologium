@@ -6,7 +6,7 @@
 
 ## 项目定位
 
-- **跨 Agent CLI 工具**：当前覆盖 Claude Code 与 Codex，后续评估 Gemini。不是 Claude Code 专属。
+- **跨 Agent CLI 工具**：当前覆盖 Claude Code 与 Codex；下一目标是 Pi。不是 Claude Code 专属。
 - 两个职责：
   1. **状态栏渲染**（`status`）——从 stdin JSON 渲染状态行，替代 bash 脚本，冷启动 <1 ms
   2. **用量解析**（`daily` / `sessions` / `blocks` / `windows` / `now`）——聚合本地 JSONL 日志，出成本/限额报表
@@ -19,14 +19,14 @@
 
 | Phase | 状态 | 说明 |
 |---|---|---|
-| 1 `status` | ✅ v1.1，dogfooding 中 | 全功能冷启动 <1 ms（bash 35 ms → ~45× 提速）。154 单测 + 50 parity snapshots |
+| 1 `status` | ✅ v1.1，观测期已过，持续使用中 | 全功能冷启动 <1 ms（bash 35 ms → ~45× 提速）。154 单测 + 50 parity snapshots |
 | 2 用量分析 | ✅ v2.1.0 完成；v2.2.1 修正 | `daily` / `sessions` / `blocks` 覆盖 Claude + Codex JSONL；定价与 streaming 去重口径已校正 |
 | 3 `configure` | ✅ TOML MVP | `~/.config/horologium/config.toml`，render 开关 / segment 顺序 / 阈值 |
-| 5 多 CLI 支持 | ✅ Codex MVP | `--source codex` 全命令支持；Gemini 待评估 |
+| 5 多 CLI 支持 | ✅ Codex MVP；Pi 设计中 | `--source codex` 全命令支持；Pi 设计见 `docs/pi-integration-design.md` |
 | 4 发布工程 | ⏳ | cargo-dist / 多平台产物 / install 脚本 |
 | 6 Plugin 壳 | ⏳ 最低 | Phase 5 完成后再评估 |
 
-**dogfooding**：2026-04-23 起 `~/.claude/settings.json` statusLine 指向 `horologium status`；bash 原版备份于 `~/.backups/claude/`。
+**dogfooding**：2026-04-23 起 `~/.claude/settings.json` statusLine 指向 `horologium status`；2 周观测期于 2026-05-07 收尾，结论为持续使用（至今未回退）；bash 原版备份保留于 `~/.backups/claude/`。
 
 ## 目录结构
 
@@ -121,5 +121,7 @@ release profile：`lto = "thin"` + `codegen-units = 1` + `strip = "symbols"` + `
 ## 未完事项备忘
 
 - 已发布：v1.0.0 / v1.1.0（Phase 1）、v2.0.0 / v2.0.1 / v2.0.2 / v2.1.0（Phase 2）、v2.2.0（跨 Agent + 结构重构）、v2.2.1（定价 + streaming correctness）均 push 至 `origin/main` 并建 GitHub Release
-- 2 周 dogfooding 观测期进行中（起始 2026-04-23）；回退方案：`~/.backups/claude/statusline.sh.bash-v1.20260423.bak`
-- ratatui TUI、写入 `~/.claude/settings.json`、git-status widget、Gemini source 后续再评估
+- dogfooding 观测期（2026-04-23 起 2 周）已于 2026-05-07 收尾：持续使用至今，未回退；bash 回退方案保留于 `~/.backups/claude/statusline.sh.bash-v1.20260423.bak`
+- 当前只推进 Pi 设计/MVP；长期 Adapter 拆分与 Gemini/OpenCode/ZCode 等后续再评估
+- Pi 设计稿：`docs/pi-integration-design.md`（讨论期间的单一来源；实现前先收敛其中 4 个待决问题）
+- ratatui TUI、写入 `~/.claude/settings.json`、git-status widget 后续再评估

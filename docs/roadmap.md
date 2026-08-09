@@ -103,7 +103,9 @@ TOML + `configure check` 足够，TUI 不作为当前兼容性工作的前置条
 - Codex 数据来源限定为本地 `~/.codex/sessions/**/*.jsonl`，核心口径是 `turn_context` 与 `token_count.last_token_usage`。
 - Codex 状态显示分两层：Codex TUI 内部使用官方原生 `/statusline` / `[tui].status_line`；Horologium 只做外部渲染和报告。
 - `configure codex-statusline` 是配置辅助，不是 external command hook，也不会让 Codex TUI 调用 Horologium。
-- 下一步回到官方配置面梳理时，只看与状态显示/统计直接相关的配置：`tui.status_line`、`tui.terminal_title`、session/log 路径、token/context/rate-limit 字段。
+- 下一目标改为 Pi 集成：独立 Pi package + Rust Adapter，先完成 Pi 原生 `/usage`、`/status` 与 footer segment，再评估其他 Harness。
+- Pi 当前仅处于设计阶段；已确认 session JSONL v3 足以提供稳定的 usage/cost/session 数据。设计边界与待决问题见 [`pi-integration-design.md`](pi-integration-design.md)。
+- 更长期的“统一 CLI + 可拆分 Harness Adapter”只保留为方向备忘，本轮不展开 Claude/Codex 拆分。
 
 | 里程碑 | 状态 |
 |---|---|
@@ -115,6 +117,9 @@ TOML + `configure check` 足够，TUI 不作为当前兼容性工作的前置条
 | `stat blocks --source codex`：按 5h block 聚合 Codex token usage | ✅ 2026-05-03：block 逻辑复用 |
 | OpenAI / Codex 模型成本估算 | ✅ 2026-05-03：GPT-5.5/5.4/5.4 mini + GPT-5.3-Codex/5.2 |
 | `daily --source gemini`：扫描 Gemini CLI 日志目录 | ⏳ |
+| `Horologium-Pi` 独立 package / Adapter MVP | ⏳ 设计中 |
+| Pi `/usage`、`/status`、footer segment | ⏳ 设计中 |
+| Horologium 通过稳定接口汇总 Pi 数据 | ⏳ 设计中 |
 | 多源混合聚合（跨 CLI 的统一 daily 视图） | ⏳ |
 
 **优先级**：Phase 2 与 Phase 3 TOML 配置 MVP 收口后启动；Phase 4 发布工程不再作为
@@ -180,3 +185,5 @@ Codex 兼容性的前置条件。
 | 2026-07-12 | dogfooding walkthrough 发现定价表过期 + divergent duplicates 调研 | (1) 定价表过期：Codex 主模型 `gpt-5.6-sol`（1943 条）无定价，Claude 缺 `claude-opus-4-8`/`claude-fable-5`/thinking 变体。修复：regen `data/litellm-anthropic-pricing.json`（21→24 models）+ pricing.rs 加 `GPT_5_6_SOL`（同 GPT-5.5 价 $5/$30/$0.50）+ `claude_alias()` 通用化 `-thinking` 后缀/旧日期名/点号版本号映射 + `codex-unknown` 加入 silent。效果：Codex daily $0→$212.20，Claude daily $501.85→$714.11，unknown 从 9+ 降到 2 项（gemini-3-flash 9 条 + 1 条空 model，均非 Anthropic/Codex）。(2) Windows 路径：`aggregate_one_session` 的 project 提取加 `\\` 分割 fallback，`D:\\Scoop\\persist\\clash-verge-rev` → `clash-verge-rev`。(3) divergent duplicates 调研：1307 中跨文件重复 id 仅 104 个（82 payload 不同），抽样显示大部分是 Claude Code streaming 增量（同 model/ts，output 1 vs 90/211），非真损坏。当前 first-seen 策略可能保留 streaming 早期版低估 cost，warning 文案"log may be corrupted"对 streaming 误导。待产品决策（first-seen vs 取 max output），不擅自改 behavior。151 tests（+4 pricing alias）+ 50 parity + clippy + fmt 全绿 |
 | 2026-07-12 | 采用 CC Switch-compatible 的 Claude streaming snapshot 去重口径 | 同类对照：(1) ccusage 用 `messageId:requestId`，真实 Claude 日志缺 `requestId` 时 `createUniqueHash` 返回 null，不去重，output=1/71 两行都会计入（轻微高估）；(2) CC Switch v3.13 在每个 JSONL 内按 `message.id` 聚合，优先有 `stop_reason` 的最终行，否则取更大的 `output_tokens`，并明确记录旧 gate 会系统性低估约 4.1%，92% 集中在 workflow/subagent。Horologium 采用后者：`Record` 新增 `stop_reason`；`read_selected_records` 在聚合前选择完整快照；兼容性 key 为 model + input + cache-read（cache creation 可仅在最终行出现），文件内/跨文件都取 stop_reason 优先/最大 output；仅不兼容 model/input/cache-read 才计 divergent 并 first-seen。真实效果：Claude output 1,314,974→1,839,634，cost $717.04→$729.34，divergent 1307→1（剩余为真同 id 不同 model/input 碰撞）。warning 改为 incompatible request metadata。154 tests（+3 streaming selection regression）+ 50 parity + clippy + fmt 全绿 |
 | 2026-07-12 | v2.2.1 patch：定价/streaming correctness + 文档/版本收口 | v2.2.0 发布后 main 有 4 个修复 commit 但 Cargo 仍声明 2.2.0，形成“同版本两套代码”漂移。bump 2.2.1；同步 Cargo description/keywords 为跨 Agent；README/AGENTS 增当前版本；intro.md 从 Claude-only 更新为 Claude+Codex 并补齐 sessions/blocks/windows/now；纳入 LiteLLM 24-model snapshot、GPT-5.6 Sol、Claude aliases、Windows project path、CC Switch-compatible streaming selection、now.rs 8 tests。154 tests + 50 parity + clippy + fmt 全绿 |
+| 2026-07-12 | Pi 作为首个外部 Adapter 试点，当前只做设计、不立即拆 Claude/Codex | Pi package 独立放在 `01.Pi-Packages/03.Horologium-Pi`，Rust 为主、薄 TypeScript bridge 接 Pi API；目标是 `/usage`、`/status`、footer 与运行时更新，同时保留 JSONL 对账。长期统一 CLI/多 Adapter 只记方向，待 Pi MVP 验证后再展开，见 `docs/pi-integration-design.md`。 |
+| 2026-08-10 | dogfooding 观测期收尾：结论为持续使用 | 2026-04-23 切换 statusLine 起的 2 周观测期（至 2026-05-07）早已结束，实际持续使用至今 3.5 个月未回退；`~/.claude/settings.json` 仍指向 `horologium status --powerline`（refreshInterval 30s），bash 备份保留于 `~/.backups/claude/statusline.sh.bash-v1.20260423.bak` 供回滚。顺带修复 clippy 新 lint `cloned_ref_to_slice_refs`（windows.rs 测试代码 `&[p.clone()]` → `std::slice::from_ref(&p)`），154 tests + clippy -D warnings + fmt 全绿 |
