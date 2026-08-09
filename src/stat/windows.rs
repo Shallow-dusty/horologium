@@ -530,7 +530,7 @@ mod tests {
         let l3 = r#"{"timestamp":"2026-05-12T07:00:00Z","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":5000,"cached_input_tokens":2500,"output_tokens":500,"total_tokens":5500}},"rate_limits":{"primary":{"used_percent":2.0,"window_minutes":300,"resets_at":3000},"secondary":{"used_percent":5.0,"window_minutes":10080,"resets_at":4020}}}}"#;
         write_jsonl(&p, &[l1, l2, l3]);
 
-        let report = aggregate(&[p.clone()], Source::Codex, Tier::Primary, 2.0);
+        let report = aggregate(std::slice::from_ref(&p), Source::Codex, Tier::Primary, 2.0);
         assert_eq!(report.windows.len(), 2);
         let w1 = report.windows.iter().find(|w| w.resets_at == 1020).unwrap();
         let w2 = report.windows.iter().find(|w| w.resets_at == 3000).unwrap();
