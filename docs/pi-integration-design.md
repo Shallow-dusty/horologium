@@ -1,6 +1,6 @@
-# Pi Integration Design（讨论稿）
+# Pi Integration Design
 
-> 状态：架构商讨中，尚未实现。当前只讨论 Pi，不展开其他 Harness 的拆分。
+> 状态：**已定稿（2026-08-10），可实现**。4 个待决问题已收敛，见文末「已收敛的四个决策」。当前只做 Pi，不展开其他 Harness 的拆分。
 
 ## 当前目标
 
@@ -44,19 +44,20 @@ TypeScript bridge，负责生命周期事件、slash command 和 UI；解析、�
 
 ## 建议的首版用户体验
 
-### `/usage`
+### `/usage`（已定：Pi-only）
 
 面向“我用了多少”，而不是复制 Pi 已有的 `/session`：
 
 1. 当前 Pi session：tokens、cost、context
 2. 今日 Pi 用量
 3. 最近 7 日 Pi 用量
-4. 可选的 Horologium 全量汇总（Claude/Codex），通过统一 CLI 接口读取
-5. 数据更新时间与是否完成对账
+4. 数据更新时间与是否完成对账
 
-首版优先可滚动页面；稳定后再考虑 tab、筛选和完整 TUI。
+**Pi-only，不混全量汇总**：在 Pi 里就看 Pi 的；跨 harness 全局视图由 Horologium CLI 提供，不在 `/usage` 里重复。
 
-### `/status`
+展示形态：**文本卡**（`pi.appendEntry()` + `pi.registerEntryRenderer()`，渲染在对话流、不进 LLM context、可上翻回看）。首版不做 tab/筛选/完整 TUI。
+
+### `/status`（已定：文本卡）
 
 面向“接入是否正常”：
 
@@ -65,6 +66,8 @@ TypeScript bridge，负责生命周期事件、slash command 和 UI；解析、�
 - 最后一次运行时采集和历史对账时间
 - session root、文件数、解析错误、协议兼容性
 - footer 是否启用
+
+展示形态同 `/usage`：**文本卡**，不用 modal（内容仅几行只读信息，且有回看价值）。
 
 ### Footer
 
@@ -76,16 +79,14 @@ Horo · Pi today $0.42 · synced ✓
 
 Pi 默认 footer 已显示当前模型、session token/cost/context；避免重复显示。
 
-## 建议的数据策略
+## 数据策略（已定：双轨）
 
-采用双轨，而不是二选一：
-
-1. **运行时更新**：Pi extension 在合适的生命周期事件后同步本次新增 assistant usage。
+1. **运行时更新**：extension 挂 `message_end`（过滤 assistant role），在该事件后同步本次新增 assistant usage。footer 数字准实时，无需手动刷新。
 2. **JSONL 对账**：启动、恢复或手动 sync 时扫描 session 文件，补回崩溃、未安装扩展期间及旧历史数据。
 
-原始 Pi JSONL 是事实来源；运行时采集是低延迟加速层。两条路径使用相同稳定事件 ID，必须可幂等去重。
+原始 Pi JSONL 是事实来源；运行时采集是低延迟加速层。两条路径使用相同稳定事件 ID（JSONL entry `id`），幂等去重、不重复计数。
 
-具体是直接提交规范化事件、同步当前 session 文件，还是先写本地 journal，尚未定稿。
+**接口形态**：Rust helper 独立子进程，TS bridge 以 JSON（stdin/stdout）通信，不采用动态库 ABI。helper 崩溃不拖累 Pi——footer 显示“未同步”标记；重启后自动补账。helper 运行时状态遵循 `~/.pi/agent/state/` 规范（`horologium-pi.json`）。
 
 ## 暂缓的长期方向
 
@@ -98,11 +99,11 @@ Pi 默认 footer 已显示当前模型、session token/cost/context；避免重�
 - WSL 使用 Linux binary，但数据环境需与普通 Linux 区分
 - 不采用 Rust 动态库 ABI；需要拆分时优先版本化 JSON/NDJSON 进程协议
 
-## 下一步只讨论的四件事
+## 已收敛的四个决策（2026-08-10）
 
-1. `/usage` 首版究竟显示哪些区块，默认是 Pi-only 还是同时显示全量汇总。
-2. `/status` 是普通文本、modal，还是二者组合。
-3. Pi 运行时更新选择哪个生命周期事件，以及如何与 JSONL entry ID 对齐。
-4. Rust helper 与现有 `horologium` 的最小接口：谁负责存储、谁负责聚合、失败时如何回退。
+1. **`/usage` = Pi-only**：当前 session + 今日 + 最近 7 日，不混 Claude/Codex 全量汇总（全局视图归 Horologium CLI）。
+2. **`/status` = 文本卡**：`appendEntry` + `registerEntryRenderer`，不用 modal；`/usage` 首版同形态。
+3. **运行时更新挂 `message_end`（assistant）**：准实时刷新 footer；与 JSONL entry `id` 对齐做幂等去重。
+4. **helper = 独立子进程 + JSON 协议**：谁存数据——helper 管增量状态（`~/.pi/agent/state/horologium-pi.json`）；谁聚合——core crate；失败回退——footer 标“未同步”，重启自动对账补回。
 
-这四项确定后，再创建 `03.Horologium-Pi` 并实现 MVP。
+下一步：创建 `03.Horologium-Pi` 并实现 MVP。
