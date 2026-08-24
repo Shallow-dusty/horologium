@@ -24,14 +24,16 @@ Horologium 做四件事：
 
 **当前发布版本：v2.2.1**（定价表更新 + Claude streaming snapshot 去重修复）。
 
+**当前开发线：v2.3.0**（workspace 已稳定；`heatmap` 已实现，尚未打 tag / 发布）。
+
 - Phase 1 `status`：**v1.1 已完成，观测期通过，持续使用**。全功能模式冷启动 <1 ms（比 bash 35 ms 快 35×+）。
 - Phase 2 用量分析：**v2.1.0 完成，v2.2.1 修正定价与 streaming 去重口径**。`daily` / `sessions` / `blocks` / `windows` / `now` 覆盖历史、会话、5h 块和 Codex rate-limit 窗口。
 - Phase 3 `configure`：**TOML 配置 MVP 已实现**。支持生成/校验配置、调整渲染开关、segment 顺序/隐藏、Powerline 颜色和阈值。
 - Phase 5 `--source codex`：**Codex 兼容 MVP 已实现**。`status` / `daily` / `sessions` / `blocks` / `windows` / `now` 均可读 Codex session JSONL。
 - **`heatmap` 子命令：v2.3 新增**。GitHub 风格年/月/周/日热力图，复用 daily 去重管线，`--metric cost|tokens` 可切换，真彩色渲染，`--plain` 转 ASCII。
-- Pi 集成已落地：`Horologium-Pi` 包（`03.AI-Zenith/05.Agent-Axiom/01.Pi-Packages/06.Horologium-Pi`）提供 `/stats`（热力图+窗口汇总）、`/usage`（当前对话）、`/status`（集成健康）三个独立命令与 footer。其 helper 基于 `horologium-core` 聚合，卡片渲染（含热力图宽度自适应）在 TS 桥内完成。
+- Pi 集成已落地：独立包 `Horologium-Pi`（本地开发路径为 `03.AI-Zenith/05.Agent-Axiom/01.Pi-Packages/06.Horologium-Pi`）提供 `/stats`、`/usage`、`/status`、`/statusline` 与 footer。helper 基于 `horologium-core` 聚合，卡片渲染（含热力图宽度自适应）在 TS 桥内完成；2026-08-24 已完成 footer/扫描缓存资源稳定性修复。
 
-路线图详见 [`docs/roadmap.md`](docs/roadmap.md)，Pi 设计讨论见 [`docs/pi-integration-design.md`](docs/pi-integration-design.md)。
+路线图详见 [`docs/roadmap.md`](docs/roadmap.md)，Pi 设计与实现边界见 [`docs/pi-integration-design.md`](docs/pi-integration-design.md)，当前 Git/发布/验证快照见 [`docs/current-status.md`](docs/current-status.md)。
 
 ## 快速开始
 

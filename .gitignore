@@ -1,4 +1,5 @@
 /target
+/.pi/
 /references
 Cargo.lock.bak
 *.swp

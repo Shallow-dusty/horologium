@@ -6,7 +6,7 @@
 
 ## 项目定位
 
-- **跨 Agent CLI 工具**：当前覆盖 Claude Code 与 Codex；下一目标是 Pi。不是 Claude Code 专属。
+- **跨 Agent CLI 工具**：当前覆盖 Claude Code、Codex；Pi 以独立仓库的 WSL MVP 形式落地。不是 Claude Code 专属。
 - 两个职责：
   1. **状态栏渲染**（`status`）——从 stdin JSON 渲染状态行，替代 bash 脚本，冷启动 <1 ms
   2. **用量解析**（`daily` / `sessions` / `blocks` / `windows` / `now`）——聚合本地 JSONL 日志，出成本/限额报表
@@ -15,14 +15,14 @@
 
 ## 当前阶段
 
-**当前发布版本：v2.2.1**（定价表更新 + Claude streaming snapshot 去重修复）。
+**当前发布版本：v2.2.1**（定价表更新 + Claude streaming snapshot 去重修复）。本地开发线为 v2.3.0，已加入 `heatmap`，尚未发布。
 
 | Phase | 状态 | 说明 |
 |---|---|---|
 | 1 `status` | ✅ v1.1，观测期已过，持续使用中 | 全功能冷启动 <1 ms（bash 35 ms → ~45× 提速）。154 单测 + 50 parity snapshots |
 | 2 用量分析 | ✅ v2.1.0 完成；v2.2.1 修正 | `daily` / `sessions` / `blocks` 覆盖 Claude + Codex JSONL；定价与 streaming 去重口径已校正 |
 | 3 `configure` | ✅ TOML MVP | `~/.config/horologium/config.toml`，render 开关 / segment 顺序 / 阈值 |
-| 5 多 CLI 支持 | ✅ Codex MVP；Pi 设计中 | `--source codex` 全命令支持；Pi 设计见 `docs/pi-integration-design.md` |
+| 5 多 CLI 支持 | ✅ Codex MVP；Pi WSL MVP | `--source codex` 全命令支持；Pi 独立包提供 `/stats`、`/usage`、`/status`、`/statusline` 与 footer；设计见 `docs/pi-integration-design.md` |
 | 4 发布工程 | ⏳ | cargo-dist / 多平台产物 / install 脚本 |
 | 6 Plugin 壳 | ⏳ 最低 | Phase 5 完成后再评估 |
 
@@ -51,13 +51,15 @@ crates/
         ├── git.rs           # .git/HEAD + origin URL 手写解析（worktree-aware，零依赖）
         ├── now.rs           # `now`: 当前 5h+7d 窗口快照（零输入）
         ├── config.rs        # Phase 3: TOML 配置 + `configure` CLI
-        └── stat.rs          # stat 系命令的 CLI args + dispatch（CommonArgs + 共享 helpers）
+        ├── stat.rs          # stat 系命令的 CLI args + dispatch（CommonArgs + 共享 helpers）
+        └── heatmap.rs       # heatmap CLI 参数与输出 dispatch
 scripts/
 └── gen-pricing.py           # 从 LiteLLM full JSON 生成 slim 快照（输出到 core/data/）
 docs/
 ├── roadmap.md       # 路线图 + 决策日志
 ├── intro.md         # 入门页
-└── pi-integration-design.md # Pi 集成设计稿
+└── pi-integration-design.md # Pi 集成设计与实现边界
+└── current-status.md        # Git/发布/验证快照
 tests/parity/        # snapshot harness（10 fixtures × 5 modes = 50 cases）
 ```
 
@@ -70,6 +72,7 @@ horologium windows [5h|7d] # Codex 限额窗口反推（默认 7d）
 horologium daily           # 按日聚合
 horologium sessions        # 按会话聚合（--sort-cost）
 horologium blocks          # 按 5h 块聚合
+horologium heatmap          # GitHub 风格活动热力图
 horologium configure ...   # TOML 配置管理
 ```
 
@@ -128,6 +131,8 @@ release profile：`lto = "thin"` + `codegen-units = 1` + `strip = "symbols"` + `
 
 - 已发布：v1.0.0 / v1.1.0（Phase 1）、v2.0.0 / v2.0.1 / v2.0.2 / v2.1.0（Phase 2）、v2.2.0（跨 Agent + 结构重构）、v2.2.1（定价 + streaming correctness）均 push 至 `origin/main` 并建 GitHub Release
 - dogfooding 观测期（2026-04-23 起 2 周）已于 2026-05-07 收尾：持续使用至今，未回退；bash 回退方案保留于 `~/.backups/claude/statusline.sh.bash-v1.20260423.bak`
-- 当前只推进 Pi 设计/MVP；长期 Adapter 拆分与 Gemini/OpenCode/ZCode 等后续再评估
-- Pi 设计稿：`docs/pi-integration-design.md`（讨论期间的单一来源；实现前先收敛其中 4 个待决问题）
+- Pi WSL MVP 与 2026-08-24 资源稳定性修复已完成；后续聚焦独立包发布、Windows/宿主环境复测与稳定协议收敛
+- Pi 设计稿：`docs/pi-integration-design.md`（设计决策与实现边界；实现状态同步见文末）
+- 当前 Git/发布/验证快照：`docs/current-status.md`
 - ratatui TUI、写入 `~/.claude/settings.json`、git-status widget 后续再评估
+- 2026-08-24 本地提交：`ab2be48`（v2.3 heatmap）、Pi 独立包 `5c33764`（footer/扫描缓存资源稳定性修复）；均尚未按发布流程打 tag/push。

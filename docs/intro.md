@@ -2,6 +2,8 @@
 
 一句话：**跨 Agent CLI（当前 Claude Code + Codex），把状态显示和本地用量分析合并到一个 Rust 二进制的工具。**
 
+当前发布版本为 `v2.2.1`；开发线为 `v2.3.0`，已加入 `heatmap`。Pi 集成作为独立的 `Horologium-Pi` WSL MVP 已落地，主仓库只维护 core 与设计/路线图。
+
 `Horologium` 是拉丁语“时钟”，对应 Agent 订阅常见的 5 小时与 7 天配额窗口。
 
 ---
@@ -59,6 +61,7 @@ Horologium 直接读取本地会话日志：Claude 默认 `~/.claude/projects/**
 - `blocks`：按本地时区固定 5h 块汇总
 - `windows [5h|7d]`：从 Codex `rate_limits` 反推窗口成本与限额
 - `now`：零输入显示当前 5h + 7d 的 used% / reset / 剩余 USD
+- `heatmap`：GitHub 风格 year/month/week/day 活跃热力图，可按 cost 或 tokens 着色
 
 **性能**：本机 665 文件 / 517 MB / 14 天历史 → **58 毫秒**（rayon 8 核 7.4× 并行）
 
@@ -95,6 +98,10 @@ Codex CLI 自身的 TUI 状态栏使用官方 `/statusline` / `[tui].status_line
 MCP 不属于这个目标；hooks 也不作为状态栏方案。后续只有在需要补充事件采集证据时，才单独评估 hooks。
 
 ---
+
+## Pi 集成
+
+Pi 版本位于独立仓库/本地包路径 `03.AI-Zenith/05.Agent-Axiom/01.Pi-Packages/06.Horologium-Pi`，提供 `/stats`、`/usage`、`/status`、`/statusline` 和 footer。Rust helper 复用本仓库的 `horologium-core`；Pi package 的资源稳定性修复、缓存策略和验证记录见其 `docs/repair-resource-stability.md`。
 
 ## 它的技术承诺
 
