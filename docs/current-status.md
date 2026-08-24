@@ -11,7 +11,8 @@
 - `origin/main`：落后本地 1 个提交，尚未 push
 - 当前已发布版本：`v2.2.1`
 - 本地开发线：`v2.3.0`
-- 最新本地提交：`ab2be48 feat(heatmap): add usage activity heatmap`
+- 最新本地提交：`461d413 docs: record Pi documentation checkpoint`
+- heatmap 代码提交：`ab2be48 feat(heatmap): add usage activity heatmap`
 - `experiment/codex-service-tier-estimates` 保留，不删除、不合并
 - `.pi/` 已加入 `.gitignore`，Pi loop runtime 文件不再污染 Git 状态
 
