@@ -18,6 +18,7 @@
 
 pub mod aggregate;
 pub mod format;
+pub mod heatmap;
 pub mod pricing;
 pub mod record;
 pub mod source;

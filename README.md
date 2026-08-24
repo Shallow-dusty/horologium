@@ -17,7 +17,7 @@ Horologium 做四件事：
 
 1. **`horologium status`** — 从 stdin 读 Claude Code JSON，打印状态栏。目标冷启动 < 20 ms。
 2. **`horologium now`** — 零输入快照：当前 5h + 7d 窗口的 used%、resets-in、剩余 USD。
-3. **`horologium daily` / `sessions` / `blocks` / `windows`** — 解析 JSONL 日志，出用量/成本/限额报表（替代 ccusage 主业）。
+3. **`horologium daily` / `sessions` / `blocks` / `windows` / `heatmap`** — 解析 JSONL 日志，出用量/成本/限额报表与 GitHub 风格热力图（替代 ccusage 主业）。
 4. **`horologium configure`** — 管理状态栏 TOML 配置；TUI 配置器留作后续。
 
 ## 当前状态
@@ -28,7 +28,8 @@ Horologium 做四件事：
 - Phase 2 用量分析：**v2.1.0 完成，v2.2.1 修正定价与 streaming 去重口径**。`daily` / `sessions` / `blocks` / `windows` / `now` 覆盖历史、会话、5h 块和 Codex rate-limit 窗口。
 - Phase 3 `configure`：**TOML 配置 MVP 已实现**。支持生成/校验配置、调整渲染开关、segment 顺序/隐藏、Powerline 颜色和阈值。
 - Phase 5 `--source codex`：**Codex 兼容 MVP 已实现**。`status` / `daily` / `sessions` / `blocks` / `windows` / `now` 均可读 Codex session JSONL。
-- 下一目标：**Pi 集成正在设计**。计划以独立 Pi package + Rust Adapter 提供 `/usage`、`/status` 和 footer，并由 Horologium 汇总；当前不展开其他 Harness 的拆分。
+- **`heatmap` 子命令：v2.3 新增**。GitHub 风格年/月/周/日热力图，复用 daily 去重管线，`--metric cost|tokens` 可切换，真彩色渲染，`--plain` 转 ASCII。
+- Pi 集成已落地：`Horologium-Pi` 包（`03.AI-Zenith/05.Agent-Axiom/01.Pi-Packages/06.Horologium-Pi`）提供 `/stats`（热力图+窗口汇总）、`/usage`（当前对话）、`/status`（集成健康）三个独立命令与 footer。其 helper 基于 `horologium-core` 聚合，卡片渲染（含热力图宽度自适应）在 TS 桥内完成。
 
 路线图详见 [`docs/roadmap.md`](docs/roadmap.md)，Pi 设计讨论见 [`docs/pi-integration-design.md`](docs/pi-integration-design.md)。
 
@@ -84,7 +85,7 @@ Opus 4.7  01.Horologium  main  15%  $1.23  5h:75%⏳2h14m  7d:92%⏳3d5h
 
 ## 数据源
 
-`status` 默认 Claude Code；其余 `stat` 类命令（`daily` / `sessions` / `blocks` / `windows` / `now`）
+`status` 默认 Claude Code；其余 `stat` 类命令（`daily` / `sessions` / `blocks` / `windows` / `now` / `heatmap`）
 **默认 `--source codex`**（Max 订阅不计费、Codex 才是钱花的地方）。切回 Claude 用 `--src claude`：
 
 ```bash
@@ -182,6 +183,22 @@ horologium daily --json                   # NDJSON，pipe 到 jq
 horologium daily --root /other/path       # 指向非默认 projects 目录
 horologium daily --src claude             # 切到 Claude
 ```
+
+### 热力图
+
+```bash
+horologium heatmap                         # 年视图，默认 codex + cost
+horologium heatmap --src claude            # Claude 历史热力图
+horologium heatmap --granularity month --at 2026-07-31   # 月视图
+horologium heatmap --granularity week      # 本周
+horologium heatmap --granularity day       # 今天（24 小时）
+horologium heatmap --metric tokens         # 切换 tokens 度量
+horologium heatmap --plain                 # 无颜色终端 / 管道用 ASCII
+horologium heatmap --json                  # NDJSON 每格一行
+```
+
+年视图 = 53 周 × 7 天网格（GitHub contribution 风格），色阶按非零值四分位；
+月/周视图格子显示日号（彩色模式），日视图按小时分桶。
 
 输出示例：
 

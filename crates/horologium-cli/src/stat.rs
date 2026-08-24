@@ -271,7 +271,7 @@ pub fn run_blocks(args: BlocksArgs) -> Result<()> {
 
 // ---- shared helpers ----------------------------------------------------
 
-fn resolve_root(override_path: Option<PathBuf>, source: Source) -> Result<PathBuf> {
+pub fn resolve_root(override_path: Option<PathBuf>, source: Source) -> Result<PathBuf> {
     if let Some(p) = override_path {
         return Ok(p);
     }
@@ -280,7 +280,7 @@ fn resolve_root(override_path: Option<PathBuf>, source: Source) -> Result<PathBu
         .ok_or_else(|| anyhow!("$HOME not set; pass --root explicitly for {} logs", source))
 }
 
-fn build_filters(common: &CommonArgs) -> Result<aggregate::Filters> {
+pub fn build_filters(common: &CommonArgs) -> Result<aggregate::Filters> {
     let parse_date = |s: &str| -> Result<NaiveDate> {
         NaiveDate::parse_from_str(s, "%Y-%m-%d")
             .map_err(|e| anyhow!("bad date `{}` (expected YYYY-MM-DD): {}", s, e))

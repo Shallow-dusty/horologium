@@ -42,7 +42,7 @@ pub struct Totals {
 }
 
 impl Totals {
-    fn merge(&mut self, other: &Totals) {
+    pub fn merge(&mut self, other: &Totals) {
         self.input_tokens += other.input_tokens;
         self.output_tokens += other.output_tokens;
         self.cache_creation_5m_tokens += other.cache_creation_5m_tokens;
@@ -56,6 +56,78 @@ impl Totals {
 /// Bucket key = calendar day in local timezone. `BTreeMap<BucketKey, Totals>`
 /// gives a deterministic ordered output without a separate sort pass.
 pub type BucketKey = NaiveDate;
+
+/// Heatmap view granularity. `Year` / `Month` / `Week` render one cell per
+/// calendar day; `Day` renders one cell per local hour.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, clap::ValueEnum)]
+pub enum HeatmapGranularity {
+    /// GitHub-style 53-week grid (one cell per day).
+    Year,
+    /// Calendar month grid (one cell per day).
+    Month,
+    /// Single row of seven day cells.
+    Week,
+    /// Single row of 24 hourly cells.
+    Day,
+}
+
+impl HeatmapGranularity {
+    pub fn label(self) -> &'static str {
+        match self {
+            HeatmapGranularity::Year => "year",
+            HeatmapGranularity::Month => "month",
+            HeatmapGranularity::Week => "week",
+            HeatmapGranularity::Day => "day",
+        }
+    }
+}
+
+/// Which value drives cell color intensity.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, clap::ValueEnum)]
+pub enum HeatmapMetric {
+    /// Cost in USD (default).
+    Cost,
+    /// Total tokens (input + output + cache reads + cache writes).
+    Tokens,
+}
+
+/// One heatmap cell. For day granularity `hour` is the local hour
+/// (0-23); for coarser granularities it is always 0 and ignored.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Default)]
+pub struct HeatCell {
+    pub date: NaiveDate,
+    pub hour: u8,
+}
+
+impl HeatCell {
+    pub fn day(date: NaiveDate) -> Self {
+        HeatCell { date, hour: 0 }
+    }
+
+    pub fn hour(date: NaiveDate, hour: u8) -> Self {
+        HeatCell { date, hour }
+    }
+}
+
+/// Aggregate heatmap cells. Same dedup pipeline as `Report`; rows are
+/// keyed by [`HeatCell`] so the renderer can lay out any granularity.
+#[derive(Default, Debug)]
+pub struct HeatmapReport {
+    pub cells: BTreeMap<HeatCell, Totals>,
+    pub malformed_lines: u64,
+    pub divergent_duplicates: u64,
+}
+
+impl Totals {
+    /// All tokens moved through this bucket (cost-relevant weights).
+    pub fn all_tokens(&self) -> u64 {
+        self.input_tokens
+            + self.output_tokens
+            + self.cache_read_tokens
+            + self.cache_creation_5m_tokens
+            + self.cache_creation_1h_tokens
+    }
+}
 
 #[derive(Default, Clone, Debug)]
 pub struct Filters {
@@ -328,6 +400,22 @@ impl LocalAccumulator {
             rows,
             malformed_lines: self.malformed,
             unknown_models,
+            divergent_duplicates: self.divergent_duplicates,
+        }
+    }
+
+    fn finalize_heatmap(self, granularity: HeatmapGranularity) -> HeatmapReport {
+        let mut cells: BTreeMap<HeatCell, Totals> = BTreeMap::new();
+        for (_, s) in self.per_id {
+            let key = match granularity {
+                HeatmapGranularity::Day => HeatCell::hour(s.date, s.local_hour),
+                _ => HeatCell::day(s.date),
+            };
+            cells.entry(key).or_default().merge(&s.totals);
+        }
+        HeatmapReport {
+            cells,
+            malformed_lines: self.malformed,
             divergent_duplicates: self.divergent_duplicates,
         }
     }
@@ -644,6 +732,30 @@ pub fn aggregate_daily_source(paths: &[PathBuf], filters: &Filters, source: Sour
         })
         .reduce(LocalAccumulator::default, LocalAccumulator::merge)
         .finalize_daily()
+}
+
+/// Same dedup pipeline as `aggregate_daily`, but buckets into heatmap cells
+/// at the requested granularity.
+pub fn aggregate_heatmap_source(
+    paths: &[PathBuf],
+    filters: &Filters,
+    source: Source,
+    granularity: HeatmapGranularity,
+) -> HeatmapReport {
+    paths
+        .par_iter()
+        .fold(LocalAccumulator::default, |mut acc, path| {
+            acc.consume_file(path, filters, source);
+            acc
+        })
+        .reduce(LocalAccumulator::default, LocalAccumulator::merge)
+        .finalize_heatmap(granularity)
+}
+
+/// Test-only convenience wrapper over [`aggregate_heatmap_source`].
+#[cfg(test)]
+pub fn aggregate_heatmap(paths: &[PathBuf], filters: &Filters) -> HeatmapReport {
+    aggregate_heatmap_source(paths, filters, Source::Claude, HeatmapGranularity::Year)
 }
 
 /// Same dedup pipeline as `aggregate_daily`, but buckets into 5-hour blocks.

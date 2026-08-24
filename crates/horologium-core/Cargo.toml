@@ -1,6 +1,6 @@
 [package]
 name = "horologium-core"
-version = "2.2.1"
+version = "2.3.0"
 description = "Horologium core: harness-agnostic pricing, record parsing, aggregation, and report formatting"
 edition.workspace = true
 rust-version.workspace = true

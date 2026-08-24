@@ -3,6 +3,7 @@ use clap::{Parser, Subcommand};
 
 mod config;
 mod git;
+mod heatmap;
 mod now;
 mod stat;
 mod status;
@@ -49,6 +50,12 @@ enum Command {
     /// Example: horologium blocks
     Blocks(stat::BlocksArgs),
 
+    /// GitHub-contribution-style activity heatmap (year / month / week / day).
+    ///
+    /// Example: horologium heatmap --source claude --metric cost
+    ///          horologium heatmap --granularity month --at 2026-07-31
+    Heatmap(heatmap::HeatmapArgs),
+
     /// Manage Horologium and agent statusline configuration.
     ///
     /// Example: horologium configure init
@@ -64,6 +71,7 @@ fn main() -> Result<()> {
         Command::Daily(args) => stat::run_daily(args),
         Command::Sessions(args) => stat::run_session(args),
         Command::Blocks(args) => stat::run_blocks(args),
+        Command::Heatmap(args) => heatmap::run_heatmap(args),
         Command::Configure(args) => config::run(args),
     }
 }
