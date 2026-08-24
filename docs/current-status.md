@@ -20,7 +20,8 @@
 - 路径：`03.AI-Zenith/05.Agent-Axiom/01.Pi-Packages/06.Horologium-Pi`
 - 当前分支：`main`
 - 工作区：clean
-- 最新提交：`5c33764 fix(resource): prevent footer scan amplification`
+- 资源修复提交：`5c33764 fix(resource): prevent footer scan amplification`
+- 最新提交：`8c21386 docs: sync installation and repair status`
 - 当前仓库未配置 remote；它作为 Pi 独立本地 package 使用
 - `~/.pi/agent/settings.json` 已登记该本地 package 路径
 - Release helper 已构建：`helper/target/release/horologium-pi-helper`
